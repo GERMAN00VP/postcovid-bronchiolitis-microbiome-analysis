@@ -18,7 +18,7 @@ BQL_ANALYSIS/
 ├── abundance_analysis.R      # Differential abundance (ANCOM-BC2) and main figure generation
 ├── adonis.R                  # Beta diversity (PERMANOVA, BETADISP, ANOSIM)
 ├── phyloseqcreation.R        # Builds the phyloseq object
-├── BQL_fromusb.ipynb         # Exploratory data analysis notebook
+├── Main_analysis.ipynb         # Exploratory data analysis notebook
 │
 ├── WGCNA_BQL_ANF.R           # WGCNA for respiratory microbiota
 ├── WGCNA_BQL_GUT.R           # WGCNA for gut microbiota
