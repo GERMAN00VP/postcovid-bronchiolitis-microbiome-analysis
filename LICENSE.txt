@@ -1,0 +1,16 @@
+Copyright (c) 2025 Vallejo-Palma G. and Collaborators
+All Rights Reserved.
+
+This work and all associated files, data, code, and documentation are the
+exclusive property of the authors listed above.
+
+Permission is hereby NOT granted to copy, distribute, modify, merge, publish,
+sell, sublicense, or use this work for any commercial or non-commercial purpose
+without explicit and written consent from the copyright holders.
+
+This repository is provided solely for the purpose of academic transparency and
+reproducibility related to the associated scientific publication. Any use beyond
+reading and reproducing the analyses internally for verification purposes is
+strictly prohibited.
+
+For permission requests, please contact the corresponding author.
