@@ -1,5 +1,5 @@
 
-setwd("/mnt/usb/BQL/BQL_ANALYSIS/WGCNA")
+setwd("/home/ucm-user/Documentos/BQL_ANALYSIS/WGCNA")
 
 #Loading WGCNA
 library(WGCNA)

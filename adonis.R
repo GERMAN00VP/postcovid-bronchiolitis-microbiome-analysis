@@ -3,7 +3,7 @@ library(dplyr)
 
 set.seed(123)
 
-setwd("/mnt/usb/BQL/BQL_ANALYSIS")
+setwd("/home/ucm-user/Documentos/BQL_ANALYSIS")
 
 
 

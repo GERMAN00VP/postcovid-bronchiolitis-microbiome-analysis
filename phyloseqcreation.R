@@ -1,4 +1,4 @@
-setwd("/mnt/usb/BQL/BQL_ANALYSIS")
+setwd("/home/ucm-user/Documentos/BQL_ANALYSIS")
 
 library(phyloseq)
 
