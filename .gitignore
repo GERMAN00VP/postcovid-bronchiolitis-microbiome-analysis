@@ -1,0 +1,13 @@
+# Abundances plots
+Abundances/*_PLOTS/
+
+# Archivos de caché
+__pycache__/
+*.pyc
+*.Rhistory
+
+
+# ANALISIS LASSO ALTERNATIVO
+bootstrap_laso/
+LASSO/
+
