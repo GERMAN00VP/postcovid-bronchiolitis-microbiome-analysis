@@ -8,8 +8,7 @@ This repository contains the updated scripts, input data, and comprehensive outp
 
 <details>
 <summary><strong>Click to expand full tree structure</strong></summary>
-
-.
+<pre><code>.
 ├── data/
 │   ├── phyloseq_data/
 │   │   ├── otu_table.csv
@@ -36,8 +35,7 @@ This repository contains the updated scripts, input data, and comprehensive outp
 ├── REANALISIS_initial_comparations.R  # Initial data parsing and global curation
 ├── REANALISIS_GUT.R                   # Core statistical pipeline for Gut samples
 ├── REANALISIS_NPA.R                   # Core statistical pipeline for NPA samples
-└── REANALISIS_NETWORKS_INTERACTION.R  # Multi-domain network construction (igraph)
-
+└── REANALISIS_NETWORKS_INTERACTION.R  # Multi-domain network construction (igraph)</code></pre>
 </details>
 
 ---
