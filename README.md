@@ -85,5 +85,5 @@ Co-occurrence and association networks evaluating cross-domain relationships bet
 ## 🔬 Dependencies & Data
 
 * **R Environment:** Requires R >= 4.1
-* **Core Packages:** phyloseq, vegan, ANCOMBC, igraph, ggplot2, dplyr, nlme, pROC
+* **Core Packages:** phyloseq, vegan, ANCOMBC, igraph, ggplot2, dplyr, nlme, pROC, SpiecEasi
 * **Input Data:** Processed OTU tables, taxonomic assignments, and sample metadata are fully contained within the data/phyloseq_data/ directory for immediate reproducibility.
