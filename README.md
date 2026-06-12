@@ -8,7 +8,7 @@ This repository contains the updated scripts, input data, and comprehensive outp
 
 <details>
 <summary><strong>Click to expand full tree structure</strong></summary>
-```bash
+
 .
 ├── data/
 │   ├── phyloseq_data/
