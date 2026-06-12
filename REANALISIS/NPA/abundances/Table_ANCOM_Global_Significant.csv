@@ -1,0 +1,8 @@
+"Genus","W Statistic","p-value","q-value (FDR)"
+"Haemophilus",8.087,"3.232e-05","0.001239"
+"Corynebacterium",6.806,"0.0002337","0.006332"
+"Microbacterium",0.008,"0.0002753","0.006332"
+"Actinobacillus",12.166,"0.0004942","0.009473"
+"Atopobium",7.053,"0.0014743","0.024221"
+"Burkholderia-Caballeronia-Paraburkholderia",12.03,"1.861e-07","2.140e-05"
+"Dolosigranulum",14.748,"7.441e-07","4.279e-05"
