@@ -113,54 +113,100 @@ sample_data(pseq_rare_genus) <- sample_data(metadata_df)
 
 
 # ==============================================================================
-# 2. CÁLCULO DE DIVERSIDAD ALFA Y BETA
+# 2. CÁLCULO DE DIVERSIDAD ALFA Y BETA (ENFOQUE DE MÁXIMO RIGOR ESTADÍSTICO)
 # ==============================================================================
-cat("\n[2] Procesando Diversidades Simplificadas por Sample Type...\n")
+cat("\n[2] Procesando Diversidades con Modelos de Efectos Mixtos y PERMANOVA Pareado...\n")
 
+# --- 2.1 ALFA DIVERSIDAD: Modelo Lineal Mixto (LME) ---
 alpha_metrics <- estimate_richness(pseq_rare_genus, measures = "Shannon")
 df_alpha <- merge(data.frame(Sample_ID = rownames(alpha_metrics), Shannon = alpha_metrics$Shannon),
                   metadata_df, by = "Sample_ID")
 
+# El modelo ideal: Ajuste simultáneo por Edad y Tipo de muestra con intercepto aleatorio por Paciente
 lme_alpha <- lme(Shannon ~ Sample_Type + Age, random = ~1|Patient_ID, data = df_alpha, method = "REML")
-beta_age  <- summary(lme_alpha)$tTable["Age", "Value"]
-row_idx   <- grep("^Sample_Type", rownames(summary(lme_alpha)$tTable))
-p_val_alpha_type <- summary(lme_alpha)$tTable[row_idx, "p-value"]
 
+# Extracción de estadísticos para la tabla y la corrección gráfica
+summary_lme <- summary(lme_alpha)$tTable
+beta_age  <- summary_lme["Age", "Value"]
+
+# Guardar tabla de Alfa Diversidad (LME)
+write.csv(summary_lme, 
+          file = paste0(output_dir_stats, "LME_Alpha_Diversity_Model.csv"), 
+          row.names = TRUE)
+
+# Guardar la variable corregida por edad basada en el coeficiente del modelo mixto
 df_alpha$Shannon_Corrected <- df_alpha$Shannon - (beta_age * df_alpha$Age)
 
+
+# --- 2.2 BETA DIVERSIDAD: PERMANOVA Secuencial Pareado y Dispersión ---
 bray_dist <- phyloseq::distance(pseq_rare_genus, method = "bray")
 ord_pcoa  <- ordinate(pseq_rare_genus, method="PCoA", distance="bray")
 df_pcoa   <- plot_ordination(pseq_rare_genus, ord_pcoa, justDF = TRUE)
+
+# Estructura de permutación pareada: Restringe los cambios ÚNICAMENTE dentro del mismo paciente
+perm_structure <- how(blocks = metadata_df$Patient_ID, nperm = 999)
+
+# PERMANOVA: Ajusta primero por edad (secuencial), controlando el diseño pareado
+permanova_res <- adonis2(bray_dist ~ Age + Sample_Type, 
+                         data = metadata_df, 
+                         permutations = perm_structure,
+                         by = "terms") # Evalúa en orden: Age primero, luego Sample_Type
+
+# Guardar tabla de PERMANOVA
+write.csv(as.data.frame(permanova_res), 
+          file = paste0(output_dir_stats, "PERMANOVA_Beta_Diversity_Pareado.csv"), 
+          row.names = TRUE)
+
+# Homogeneidad de la dispersión de grupos (Betadisper)
+dispersion_res <- betadisper(bray_dist, group = metadata_df$Sample_Type)
+permtest_disp  <- permutest(dispersion_res, permutations = perm_structure)
+
+# Guardar tabla de Dispersión
+write.csv(as.data.frame(permtest_disp$tab), 
+          file = paste0(output_dir_stats, "Betadisper_Homogeneity_Test.csv"), 
+          row.names = TRUE)
+
+
+# --- 2.3 GRÁFICOS PARA PUBLICACIÓN (Limpios, sin títulos estadísticos) ---
 
 p_alpha_box <- ggplot(df_alpha, aes(x = Sample_Type, y = Shannon_Corrected, fill = Sample_Type)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.85, width = 0.5) +
   geom_jitter(width = 0.1, alpha = 0.4, size = 1.5, color = "#2c3e50") +
   scale_fill_manual(values = niche_colors) +
-  theme_bw(base_size = 11) +
-  labs(title = "A. Alpha Diversity (Age-Corrected Shannon)",
-       subtitle = sprintf("LME Effect: Sample_Type p = %.4f*", p_val_alpha_type),
-       x = "Niche / Sample Type", y = "Shannon Index") +
-  theme(plot.title = element_text(face = "bold", size = 12),
-        axis.text.x = element_text(face = "bold", size = 10),
-        legend.position = "none")
+  theme_bw(base_size = 12) +
+  labs(x = "Niche / Sample Type", 
+       y = "Shannon Index (Age-Corrected)") +
+  theme(axis.title = element_text(face = "bold", size = 11),
+        axis.text = element_text(color = "black", size = 10),
+        axis.text.x = element_text(face = "bold"),
+        legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
 
 p_beta_pcoa <- ggplot(df_pcoa, aes(x = Axis.1, y = Axis.2, color = Sample_Type)) +
   geom_point(size = 2.5, alpha = 0.8) +
   stat_ellipse(aes(fill = Sample_Type), geom = "polygon", alpha = 0.1, type = "t", linetype = 2) +
   scale_color_manual(values = niche_colors, name = "Niche Location") +
   scale_fill_manual(values = niche_colors, name = "Niche Location") +
-  theme_bw(base_size = 11) +
-  labs(title = "B. Beta Diversity PCoA (Bray-Curtis)",
-       subtitle = "PERMANOVA (Strata = Patient_ID):\nSample_Type separation p = 0.001***",
-       x = paste0("PCoA 1 (", round(ord_pcoa$values$Relative_eig[1] * 100, 1), "%)"),
+  theme_bw(base_size = 12) +
+  labs(x = paste0("PCoA 1 (", round(ord_pcoa$values$Relative_eig[1] * 100, 1), "%)"),
        y = paste0("PCoA 2 (", round(ord_pcoa$values$Relative_eig[2] * 100, 1), "%)")) +
-  theme(plot.title = element_text(face = "bold", size = 12),
-        legend.title = element_text(face = "bold", size = 9),
-        legend.text = element_text(size = 8.5))
+  theme(axis.title = element_text(face = "bold", size = 11),
+        axis.text = element_text(color = "black", size = 10),
+        legend.title = element_text(face = "bold", size = 10),
+        legend.text = element_text(size = 9),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
 
-panel_joint <- p_alpha_box + p_beta_pcoa + plot_layout(ncol = 2, widths = c(1, 1))
-ggsave(paste0(output_dir_global, "Plot_Diversity_Simplified_Panel.png"), plot = panel_joint, width = 13, height = 5.5, dpi = 300)
 
+# --- 2.4 Ensamblado Final con Patchwork y Guardado (300 DPI) ---
+panel_joint <- p_alpha_box + p_beta_pcoa + 
+  plot_layout(ncol = 2, widths = c(1, 1.2)) + 
+  plot_annotation(tag_levels = 'a') & 
+  theme(plot.tag = element_text(face = "bold", size = 14))
+
+ggsave(paste0(output_dir_global, "Plot_Diversity_Simplified_Panel.png"), 
+       plot = panel_joint, width = 10, height = 4.5, dpi = 300)
 
 # ==============================================================================
 # 3. REDES DE CADA NICHO (INTRA-NICHO CO-ABUNDANCIA)
@@ -355,7 +401,9 @@ metadata_cleaned <- raw_metadata %>%
   distinct(Patient_ID, .keep_all = TRUE)
 
 df_analysis_clean_base <- df_analysis %>% select(Patient_ID, starts_with("NPA_Mod"), starts_with("GUT_Mod"))
-df_analysis_extended   <- inner_join(df_analysis_clean_base, metadata_cleaned, by="Patient_ID")
+
+# CORRECCIÓN: Forzamos de forma explícita el uso de dplyr para evitar conflictos con 'mia'
+df_analysis_extended   <- dplyr::inner_join(df_analysis_clean_base, metadata_cleaned, by="Patient_ID")
 
 target_modules <- c(grep("^NPA_Mod", colnames(df_analysis_extended), value=TRUE), grep("^GUT_Mod", colnames(df_analysis_extended), value=TRUE))
 predictors_list <- c("Bronchiolitis", "RSV Infection", "Wheezing", "Age (Months)", "Breastfeeding", "Cesarean Delivery", "Previous Antibiotics", "Family History Atopy")
@@ -438,7 +486,7 @@ taxa_gut_status <- data.frame(Genus = V(g_gut)$name, Niche = "Gut (GUT)", Struct
 # 2. Combinamos la taxonomía base, eliminamos el módulo de ruido (0) y cruzamos con sus grados
 master_taxa_raw <- rbind(taxa_npa_status, taxa_gut_status) %>% 
   filter(Structural_Module != 0) %>%
-  left_join(deg_master, by = c("Genus", "Niche"))
+  dplyr::left_join(deg_master, by = c("Genus", "Niche"))
 
 # 3. Colapsamos la taxonomía: una sola línea por módulo con sus géneros unidos por espacios y su Hub
 master_modules_collapsed <- master_taxa_raw %>%
@@ -461,7 +509,7 @@ if(exists("regression_results") && nrow(regression_results) > 0) {
   
   # Combinamos las betas clínicas con nuestra estructura de módulos colapsados
   master_clinical_report <- master_modules_collapsed %>%
-    left_join(clinical_p_wide, by = c("Structural_Module" = "Module_Num", "Niche" = "Niche_Prefix")) %>%
+    dplyr::left_join(clinical_p_wide, by = c("Structural_Module" = "Module_Num", "Niche" = "Niche_Prefix")) %>%
     mutate(Structural_Module = paste0(ifelse(Niche == "Nasopharynx (NPA)", "NPA_Mod", "GUT_Mod"), Structural_Module)) %>%
     arrange(desc(Niche), Structural_Module)
   

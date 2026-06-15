@@ -26,29 +26,21 @@ set.seed(123)
 options(stringsAsFactors = FALSE)
 enableWGCNAThreads(nThreads = 4)
 
-setwd("/mnt/usb/BQL/BQL_ANALYSIS")
+setwd("/mnt/usb/BQL/BQL_ANALYSIS/COMPLETE_REANALISIS_BQL/")
 
 output_dir_global <- "REANALISIS/Global/"
 
 if(!dir.exists(output_dir_global)) dir.create(output_dir_global, recursive = TRUE)
 
 # ==============================================================================
-# SECTION 2: GLOBAL DATA PRE-PROCESSING & STRUCTURAL CURATION (RENAME & ELLIPSE)
+# SECTION 2: GLOBAL DATA PRE-PROCESSING & PCoA (BEFORE OUTLIER REMOVAL, AT GENUS LEVEL)
 # ==============================================================================
-pseq <- readRDS("data/phyloseq_object.rds")
+pseq_raw_init <- readRDS("data/phyloseq_object.rds")
 
-# 1. ELIMINACIÓN DEL OUTLIER FALSO (BQLHSO91GUT)
-muestras_a_mantener <- setdiff(sample_names(pseq), c("BQLHSO91GUT", "HULP71ANF","HULP71GUT"))
-pseq <- prune_samples(muestras_a_mantener, pseq)
-
-# 2. CAMBIO LITERAL DE NOMBRES (ID de muestra) EN LA ESTRUCTURA MATRICIAL
-# Intercambiamos físicamente los rownames del objeto phyloseq para corregir el swap de raíz
-
-# 3. REESTRUCTURACIÓN Y CORRECCIÓN DE LOS METADATOS INTERNOS
-sample_data(pseq)$Sample_ID <- sample_names(pseq)
-metadata_all <- as(sample_data(pseq), "data.frame") %>%
+# A. Sincronización y curación de metadatos iniciales con TODO (incluyendo outliers)
+sample_data(pseq_raw_init)$Sample_ID <- sample_names(pseq_raw_init)
+metadata_init <- as(sample_data(pseq_raw_init), "data.frame") %>%
   mutate(
-    # Reasignamos el tipo de muestra correcto según el nuevo nombre real estructurado
     Sample_Type = case_when(
       str_detect(Sample_ID, "ANF$") ~ "NPA", 
       str_detect(Sample_ID, "GUT$") ~ "GUT",
@@ -56,33 +48,34 @@ metadata_all <- as(sample_data(pseq), "data.frame") %>%
     ),
     Patient_ID = str_remove(Sample_ID, "(ANF|GUT)$")
   )
-sample_data(pseq) <- sample_data(metadata_all)
+sample_data(pseq_raw_init) <- sample_data(metadata_init)
 
-# 4. RAREFACCIÓN Y CÁLCULO DE DISTANCIAS
-min_seq_depth <- min(sample_sums(pseq))
-pseq_rarefied <- rarefy_even_depth(pseq, sample.size = min_seq_depth, rngseed = 123, replace = FALSE, trimOTUs = TRUE)
+# B. Transformación a nivel de GÉNERO y Rarefacción manteniendo los outliers
+pseq_init_genus <- tax_glom(pseq_raw_init, taxrank = "Genus", NArm = FALSE)
+min_depth_init  <- min(sample_sums(pseq_init_genus))
+pseq_init_rare  <- rarefy_even_depth(pseq_init_genus, sample.size = min_depth_init, rngseed = 123, replace = FALSE, trimOTUs = TRUE)
 
-dist_bray_global <- phyloseq::distance(pseq_rarefied, method = "bray")
-pcoa_global <- ordinate(pseq_rarefied, method = "PCoA", distance = dist_bray_global)
-eigenvalues <- pcoa_global$values$Relative_eig * 100
+# C. Cálculo de distancias y ordenación (Nivel Género con Outliers)
+dist_bray_init <- phyloseq::distance(pseq_init_rare, method = "bray")
+pcoa_init      <- ordinate(pseq_init_rare, method = "PCoA", distance = dist_bray_init)
+eigenvalues    <- pcoa_init$values$Relative_eig * 100
 
 df_pcoa_diag <- data.frame(
-  PCoA1 = pcoa_global$vectors[, 1],
-  PCoA2 = pcoa_global$vectors[, 2],
-  Sample_Type = sample_data(pseq_rarefied)$Sample_Type,
-  Patient_ID = sample_data(pseq_rarefied)$Patient_ID
+  PCoA1 = pcoa_init$vectors[, 1],
+  PCoA2 = pcoa_init$vectors[, 2],
+  Sample_Type = sample_data(pseq_init_rare)$Sample_Type,
+  Patient_ID = sample_data(pseq_init_rare)$Patient_ID
 )
 
-# 5. PCoA LIMPIO CON ELIPSES DE CONFIANZA (SIN ETICUETAS DE TEXTO)
+# D. Renderizado del PCoA global original a nivel de Género
 plot_pcoa_diag <- ggplot(df_pcoa_diag, aes(x = PCoA1, y = PCoA2, color = Sample_Type)) +
   geom_point(size = 4.5, alpha = 0.80, stroke = 0.3) + 
-  # NUEVO: Añadimos las elipses de confianza estándar (95% de asunción normal)
   stat_ellipse(aes(fill = Sample_Type), geom = "polygon", alpha = 0.10, linewidth = 0.8, linetype = "dashed") +
   theme_bw() +
   scale_color_manual(values = c("NPA" = "#3498db", "GUT" = "#2ecc71"), name = "Sample Type") +
   scale_fill_manual(values = c("NPA" = "#3498db", "GUT" = "#2ecc71"), name = "Sample Type") +
   labs(
-    title = "Global PCoA",
+    title = "Global PCoA (Genus Level - Includes Outliers)",
     subtitle = "",
     x = paste0("PCoA 1 (", round(eigenvalues[1], 1), "%)"),
     y = paste0("PCoA 2 (", round(eigenvalues[2], 1), "%)")
@@ -100,6 +93,19 @@ plot_pcoa_diag <- ggplot(df_pcoa_diag, aes(x = PCoA1, y = PCoA2, color = Sample_
   )
 
 ggsave(paste0(output_dir_global, "Diagnostic_PCoA_Bray_Curtis_FINAL.png"), plot = plot_pcoa_diag, width = 10, height = 8, dpi = 300)
+
+
+# ==============================================================================
+# ELIMINACIÓN POSTERIOR DE LOS 3 OUTLIERS (Para el resto del flujo estándar)
+# ==============================================================================
+pseq <- pseq_raw_init # Hereda los metadatos corregidos estructurados arriba
+muestras_a_mantener <- setdiff(sample_names(pseq), c("BQLHSO91GUT", "HULP71ANF","HULP71GUT"))
+pseq <- prune_samples(muestras_a_mantener, pseq)
+
+# Recalculamos la rarefacción limpia para el entorno río abajo (sin los 3 outliers)
+min_seq_depth <- min(sample_sums(pseq))
+pseq_rarefied <- rarefy_even_depth(pseq, sample.size = min_seq_depth, rngseed = 123, replace = FALSE, trimOTUs = TRUE)
+dist_bray_global <- phyloseq::distance(pseq_rarefied, method = "bray")
 
 # ==============================================================================
 # SECTION 3: ALIGNED DUAL BARPLOT WITH HIGH-CONTRAST VIBRANT PALETTE
@@ -178,10 +184,10 @@ p_npa <- ggplot(df_npa_plot, aes(x = Patient_ID, y = Abundance, fill = Taxon_Fin
   labs(title = "Nasopharyngeal Aspirate Profile (NPA)", y = "Relative Abundance (%)", x = NULL) +
   theme(
     axis.text.x = element_blank(), axis.ticks.x = element_blank(),
-    axis.text.y = element_text(size = 11, color = "black"),
-    axis.title.y = element_text(size = 13, face = "bold"),
+    axis.text.y = element_text(size = 14, color = "black"),                  # Fuente de eje y más grande
+    axis.title.y = element_text(size = 14, face = "bold"),
     panel.grid = element_blank(),
-    plot.title = element_text(size = 15, face = "bold", margin = margin(b = 10))
+    plot.title = element_text(size = 16, face = "bold", margin = margin(b = 10))
   ) +
   scale_y_continuous(expand = c(0, 0))
 
@@ -197,10 +203,10 @@ p_gut <- ggplot(df_gut_plot, aes(x = Patient_ID, y = Abundance, fill = Taxon_Fin
   labs(title = "Gut Microbiota Profile (GUT)", y = "Relative Abundance (%)", x = NULL) +
   theme(
     axis.text.x = element_blank(), axis.ticks.x = element_blank(),
-    axis.text.y = element_text(size = 11, color = "black"),
-    axis.title.y = element_text(size = 13, face = "bold"),
+    axis.text.y = element_text(size = 14, color = "black"),                  # Fuente de eje y más grande
+    axis.title.y = element_text(size = 14, face = "bold"),
     panel.grid = element_blank(),
-    plot.title = element_text(size = 15, face = "bold", margin = margin(b = 10))
+    plot.title = element_text(size = 16, face = "bold", margin = margin(b = 10))
   ) +
   scale_y_continuous(expand = c(0, 0))
 
@@ -220,15 +226,24 @@ p_meta_bar <- ggplot(df_meta_bar, aes(x = Patient_ID, y = 1, fill = Condicion_Cl
   labs(x = "Patients", y = NULL) +
   theme(
     axis.text.x = element_blank(), axis.ticks = element_blank(), axis.text.y = element_blank(),
-    axis.title.x = element_text(size = 13, face = "bold", margin = margin(t = 10)),
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 10)),
     panel.grid = element_blank(),
-    legend.title = element_text(size = 12, face = "bold"), legend.text = element_text(size = 10)
+    legend.title = element_text(size = 14, face = "bold"),                   # Títulos de leyendas más legibles
+    legend.text = element_text(size = 13)                                    # Textos de leyendas más legibles
   ) +
   scale_y_continuous(expand = c(0, 0))
 
 # --- ASSEMBLING WITH PATCHWORK ---
+# Se mantiene tu estructura de layouts y colecta de guías tal como estaba originalmente
 plot_mirror_final <- (p_npa / p_gut / p_meta_bar) + 
   plot_layout(heights = c(10, 10, 1.2), guides = "collect")
+
+# Asignamos tags 'a' y 'b' solo a los dos paneles principales, dejando el track clínico sin letra
+plot_mirror_final <- plot_mirror_final + 
+  plot_annotation(tag_levels = list(c('a', 'b', ''))) & 
+  theme(plot.tag = element_text(face = "bold", size = 18),
+        legend.title = element_text(size = 14, face = "bold"),                # Asegura legibilidad en la leyenda colectada
+        legend.text = element_text(size = 13))
 
 ggsave(
   filename = paste0(output_dir_global, "Aligned_NPA_vs_GUT_Curated_Plot.png"),
@@ -241,15 +256,11 @@ ggsave(
 # ==============================================================================
 # SECTION 4: EXPORT CURATED GLOBAL ENVIRONMENT FOR DOWNSTREAM ANALYSES
 # ==============================================================================
-
-# 1. Definir y crear el directorio específico para los datos globales curados
 data_output_dir <- paste0(output_dir_global, "curated_data_global/")
 if(!dir.exists(data_output_dir)) dir.create(data_output_dir, recursive = TRUE)
 
 cat("Construyendo metadatos clínicos finales e integrándolos en el objeto global...\n")
 
-# 2. CONSTRUCCIÓN DE METADATOS MAESTROS CON TODAS LAS VARIABLES CLÍNICAS FIJADAS
-# Generamos la Condicion_Clinica AQUÍ para que quede grabada de forma permanente
 metadata_global_final <- as(sample_data(pseq), "data.frame") %>%
   mutate(
     RSV_Wheezing = paste0(Respiratory.syncytial.virus, "_", Wheezing.treatment),
@@ -270,26 +281,15 @@ metadata_global_final <- as(sample_data(pseq), "data.frame") %>%
     Sample_Type = as.factor(Sample_Type)
   )
 
-# 3. Sincronizamos los metadatos completos dentro de ambos objetos phyloseq antes de guardar
+# Sincronizamos los metadatos completos (SIN OUTLIERS) dentro de ambos objetos antes de guardar
 sample_data(pseq)          <- sample_data(metadata_global_final)
 sample_data(pseq_rarefied) <- sample_data(metadata_global_final)
 
-
-# 4. GUARDADO DE OBJETOS EN DISCO (Totalmente listos para cualquier script futuro)
-
-# Recuentos RAW curados con metadatos completos
+# Guardado de objetos limpios en disco (exactamente igual que antes)
 saveRDS(pseq, file = paste0(data_output_dir, "phyloseq_RAW_curated_global.rds"))
-
-# Cuentas RAREFACTADAS globales con metadatos completos
 saveRDS(pseq_rarefied, file = paste0(data_output_dir, "phyloseq_RAREFIED_global.rds"))
-
-# Matriz de distancias Bray-Curtis global
 saveRDS(dist_bray_global, file = paste0(data_output_dir, "distance_matrix_bray_global.rds"))
-
-# Tabla de metadatos en formatos limpios
 saveRDS(metadata_global_final, file = paste0(data_output_dir, "metadata_curated_global.rds"))
 write.csv(metadata_global_final, file = paste0(data_output_dir, "metadata_curated_global.csv"), row.names = FALSE)
 
 cat("\n[✓] ¡PROCESO DE CURACIÓN Y ENRIQUECIMIENTO COMPLETADO!")
-cat("\n- Los objetos guardados ya contienen la variable 'Condicion_Clinica'.")
-cat("\n- El Script 2 y cualquier script futuro funcionarán directamente sin alterar metadatos.\n")
