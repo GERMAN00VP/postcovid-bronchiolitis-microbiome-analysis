@@ -22,7 +22,7 @@ set.seed(123)
 options(stringsAsFactors = FALSE)
 enableWGCNAThreads(nThreads = 4) 
 
-setwd("/mnt/usb/BQL/BQL_ANALYSIS")
+setwd("/mnt/usb/BQL/BQL_ANALYSIS/COMPLETE_REANALISIS_BQL/")
 
 # Configuración estricta de la jerarquía de carpetas enfocada en el nicho intestinal (GUT)
 base_dir        <- "REANALISIS/GUT/"
@@ -30,17 +30,16 @@ dir_alpha       <- paste0(base_dir, "alpha/")
 dir_beta        <- paste0(base_dir, "beta/")
 dir_abundances  <- paste0(base_dir, "abundances/")
 dir_models      <- paste0(base_dir, "models/") # Guardado directo sin subcarpetas
-output_dir_wgcna <- paste0(base_dir, "WGCNA/") # Directorio de WGCNA integrado bajo GUT
 
 # Creación recursiva de todos los directorios del proyecto para GUT
-for(path in c(dir_alpha, dir_beta, dir_abundances, dir_models, output_dir_wgcna)){
+for(path in c(dir_alpha, dir_beta, dir_abundances, dir_models)){
   if(!dir.exists(path)) dir.create(path, recursive = TRUE)
 }
 
 # ==============================================================================
 # SECTION 2: GLOBAL DATA PRE-PROCESSING & SUBSETTING (GUT FOCUS)
 # ==============================================================================
-data_input_dir <- "REANALISIS_2/curated_data_global/"
+data_input_dir <- "REANALISIS/Global/curated_data_global/"
 
 pseq_raw_master  <- readRDS(paste0(data_input_dir, "phyloseq_RAW_curated_global.rds"))
 pseq_rare_master <- readRDS(paste0(data_input_dir, "phyloseq_RAREFIED_global.rds"))
@@ -113,27 +112,6 @@ stat_results <- df_alpha_long %>%
   add_significance("p.adj") %>%
   filter(p.adj < 0.05)
 
-plot_alpha <- ggplot(df_alpha_long, aes(x = Condicion_Clinica, y = Value, fill = Condicion_Clinica)) +
-  geom_boxplot(alpha = 0.7, outlier.shape = NA, width = 0.6) +
-  geom_jitter(width = 0.15, alpha = 0.3, color = "black", size = 0.9) +
-  facet_wrap(~ Metric, scales = "free_y", ncol = 3) +
-  theme_bw() + scale_fill_brewer(palette = "Set2") +
-  labs(title = "Gut Microbiota Alpha Diversity Across Clinical Conditions",
-       subtitle = "Age-adjusted residuals | Pairwise comparisons (Wilcoxon FDR)",
-       x = "Clinical Group (RSV & Recurrent Wheezing Status)", y = "Alpha Diversity Index Value (Age-Corrected)") +
-  theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
-        text = element_text(size = 12), plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
-        plot.subtitle = element_text(size = 11, hjust = 0.5, face = "italic"),
-        strip.background = element_rect(fill = "#2c3e50"), strip.text = element_text(color = "white", face = "bold", size = 11),
-        panel.grid.minor = element_blank()) +
-  scale_y_continuous(expand = expansion(mult = c(0.05, 0.28)))
-
-if(nrow(stat_results) > 0) {
-  stat_results <- stat_results %>% add_y_position(step.increase = 0.12)
-  plot_alpha <- plot_alpha + stat_pvalue_manual(stat_results, label = "p.adj.signif", hide.ns = TRUE, step.increase = 0.09, tip.length = 0.01)
-}
-ggsave(paste0(dir_alpha, "Plot_Alpha_Diversity_Clean.png"), plot = plot_alpha, width = 13, height = 6, dpi = 300)
-
 # ==============================================================================
 # SECTION 4: BETA DIVERSITY (MULTIVARIATE SPATIAL DYNAMICS)
 # ==============================================================================
@@ -156,15 +134,72 @@ write.csv(tabla_post_hoc_beta, paste0(dir_beta, "Table_Beta_Diversity_Pairwise_P
 porcentaje_variacion <- round(100 * (beta_disp_final$eig / sum(beta_disp_final$eig)), 1)
 df_pcoa <- data.frame(PCoA1 = beta_disp_final$vectors[, 1], PCoA2 = beta_disp_final$vectors[, 2], Clinical_Group = metadata_beta$Condicion_Clinica)
 
+# ==============================================================================
+# SECTION 3 & 4: DIVERSITY PLOTTING (INTEGRATED PREMIUM PANEL)
+# ==============================================================================
+cat("\n[3 & 4] Generando Panel de Figuras Unificado para GUT (Modo Paper - Proporciones Corregidas)...\n")
+library(patchwork)
+
+# --- Diseño: ALFA DIVERSIDAD (Panel Superior 2a) ---
+plot_alpha <- ggplot(df_alpha_long, aes(x = Condicion_Clinica, y = Value, fill = Condicion_Clinica)) +
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, width = 0.55, color = "#2c3e50", lwd = 0.6) +
+  geom_jitter(width = 0.12, alpha = 0.25, color = "black", size = 0.8) +
+  facet_wrap(~ Metric, scales = "free_y", ncol = 3) +
+  theme_bw(base_size = 11) + 
+  scale_fill_brewer(palette = "Set2") +
+  labs(x = NULL, y = "Alpha Diversity Value\n(Age-Corrected)") +
+  theme(legend.position = "none", 
+        axis.text.x = element_text(angle = 30, hjust = 1, size = 9, color = "black"),
+        axis.text.y = element_text(size = 9, color = "black"),
+        strip.background = element_rect(fill = "#2c3e50", color = NA), 
+        strip.text = element_text(color = "white", face = "bold", size = 10),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = "#f0f0f0")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.05)))
+
+if(nrow(stat_results) > 0) {
+  stat_results <- stat_results %>% add_y_position(step.increase = 0.04)
+  plot_alpha <- plot_alpha + stat_pvalue_manual(stat_results, label = "p.adj.signif", hide.ns = TRUE, step.increase = 0.04, tip.length = 0.01)
+}
+
+# --- Diseño: BETA DIVERSIDAD (Panel Inferior 2b) ---
 plot_pcoa <- ggplot(df_pcoa, aes(x = PCoA1, y = PCoA2, color = Clinical_Group, fill = Clinical_Group)) +
-  geom_point(size = 2.5, alpha = 0.6) + stat_ellipse(geom = "polygon", alpha = 0.1, level = 0.95, size = 0.5) +
-  theme_bw() + scale_color_brewer(palette = "Set2") + scale_fill_brewer(palette = "Set2") +
-  labs(title = "Principal Coordinates Analysis (PCoA) of Gut Microbiota",
-       subtitle = paste0("PERMANOVA p = ", format.pval(permanova_results$`Pr(>F)`[2], digits = 3), " | Betadisper p = ", format.pval(disp_test$tab$`Pr(>F)`[1], digits = 3)),
-       x = paste0("PCoA 1 (", porcentaje_variacion[1], "%)"), y = paste0("PCoA 2 (", porcentaje_variacion[2], "%)"), color = "Clinical Group", fill = "Clinical Group") +
-  theme(text = element_text(size = 12), plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
-        plot.subtitle = element_text(size = 10, hjust = 0.5, face = "italic"), panel.grid.minor = element_blank())
-ggsave(paste0(dir_beta, "Plot_Beta_Diversity_PCoA.png"), plot = plot_pcoa, width = 8.5, height = 6, dpi = 300)
+  geom_point(size = 2.2, alpha = 0.65) + 
+  stat_ellipse(geom = "polygon", alpha = 0.08, level = 0.95, size = 0.4, linetype = 2) +
+  theme_bw(base_size = 11) + 
+  scale_color_brewer(palette = "Set2", name = "Clinical Phenotype Group") + 
+  scale_fill_brewer(palette = "Set2", name = "Clinical Phenotype Group") +
+  labs(x = paste0("PCoA 1 (", porcentaje_variacion[1], "%)"), 
+       y = paste0("PCoA 2 (", porcentaje_variacion[2], "%)")) +
+  theme(axis.text = element_text(size = 9, color = "black"),
+        axis.title = element_text(size = 10, face = "bold"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = "#f0f0f0"),
+        legend.title = element_text(face = "bold", size = 10),
+        legend.text = element_text(size = 9),
+        legend.position = "right")
+
+# --- Ensamblado y guardado final (Ajuste de ratio 0.7 a 1 para balancear alturas) ---
+integrated_panel <- plot_alpha / plot_pcoa + 
+  plot_layout(ncol = 1, heights = c(0.7, 1)) + # CORRECCIÓN: Menos alto arriba, más espacio abajo
+  plot_annotation(
+   tag_levels = 'a'
+  ) & 
+  theme(
+    plot.title = element_text(face = "bold", size = 13, hjust = 0.5, color = "#2c3e50"),
+    plot.subtitle = element_text(size = 10, hjust = 0.5, face = "italic", color = "#555555"),
+    plot.tag = element_text(face = "bold", size = 14, color = "#2c3e50")
+  )
+
+ggsave(
+  filename = paste0(base_dir, "Figure2_GUT_Diversity_Integrated_Panel.png"), 
+  plot = integrated_panel, 
+  width = 10, 
+  height = 9.0, # Ajustado levemente el alto global para compactar el lienzo de dibujo
+  dpi = 300
+)
+
+cat(" >> ¡Análisis de diversidad de GUT completado con éxito con proporciones balanceadas!\n")
 
 # ==============================================================================
 # SECTION 5: COMPOSITIONAL ANALYSIS (ANCOM-BC2) WITH BIAS-CORRECTED JITTER IMPUTATION
@@ -175,14 +210,69 @@ output = ancombc2(
   dunnet = FALSE, pairwise = TRUE, global = TRUE, alpha = 0.05
 )
 
+# 1. Extraer las tablas nativas del objeto de salida
 df_global <- output$res_global
-tabla_ancom_significativa <- df_global %>%
-  filter(diff_abn == TRUE) %>%
-  mutate(W = round(W, 3), p_val = format.pval(p_val, digits = 4), q_val = format.pval(q_val, digits = 4)) %>%
-  select(Genus = taxon, `W Statistic` = W, `p-value` = p_val, `q-value (FDR)` = q_val) %>%
-  arrange(`q-value (FDR)`)
+df_pair   <- output$res_pair  # Contiene los LFC y p_val para cada par de grupos
 
-write.csv(tabla_ancom_significativa, paste0(dir_abundances, "Table_ANCOM_Global_Significant.csv"), row.names = FALSE)
+# 2. Filtrado Global Robusto (Uso estricto de diff_robust_abn para evitar falsos positivos)
+taxones_robust_globales <- df_global %>% 
+  filter(diff_robust_abn == TRUE) %>% 
+  pull(taxon)
+
+# 3. Mapeo de diferencias entre grupos (Pairwise Analysis)
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+tabla_ancom_grupos <- df_pair %>%
+  # 1. Filtramos por tus taxones robustos globales
+  filter(taxon %in% taxones_robust_globales) %>%
+  
+  # 2. Pivotamos usando un patrón adaptado exactamente a tus prefijos de ANCOM-BC2.
+  # Captura los prefijos conocidos (lfc, se, W, p, q, diff, passed_ss, diff_robust) 
+  # y deja todo lo que viene detrás en la columna "Comparacion"
+  pivot_longer(
+    cols = -taxon,
+    names_to = c(".value", "Comparacion"),
+    names_pattern = "^(lfc|se|W|p|q|diff|passed_ss)_(.*)"
+  ) %>%
+  
+  # 3. Limpiamos por completo el molesto prefijo "Condicion_Clinica" de los nombres de los grupos
+  mutate(Comparacion = str_remove_all(Comparacion, "Condicion_Clinica")) %>%
+  
+  # 4. Seleccionamos y renombramos las columnas para tu reporte final
+  # Incluyendo p_value, q_value (FDR) y el control de calidad passed_ss
+  select(
+    Genus = taxon, 
+    Comparacion_Especifica = Comparacion, 
+    `Log Fold Change (LFC)` = lfc, 
+    `W Statistic` = W,
+    `Standard Error (SE)` = se,
+    `p-value` = p,
+    `q-value (FDR)` = q,
+    `Passed Sensitivity (SS)` = passed_ss
+  ) %>%
+  
+  # 5. Opcional: Si quieres quitar las filas de control basal de intercepto (ej. las que solo dicen "RSV-/Wheeze-")
+  # y quedarte solo con las comparaciones reales cara a cara (las que contienen el guion bajo "_"), desenta esta linea:
+  # filter(str_detect(Comparacion_Especifica, "_")) %>%
+  
+  # 6. Ordenamos por Genus y por significancia estadística del p-valor bruto
+  # ... (todo tu select anterior igual) ...
+  # JUSTO AQUÍ AÑADES ESTA LÍNEA:
+  filter(!is.na(`Log Fold Change (LFC)`)) %>%
+  arrange(Genus, `p-value`)
+
+# 4. Almacenamiento de los resultados para Modelos y Plots
+# Guardamos la tabla detallada que te dice exactamente qué par de grupos difiere y en qué dirección (LFC)
+write.csv(tabla_ancom_grupos, paste0(dir_abundances, "Table_ANCOM_Pairwise_From_Global_Robust.csv"), row.names = FALSE)
+
+# Guardamos también un resumen limpio de los ganadores globales para los plots
+df_global_significativa <- df_global %>%
+  filter(diff_robust_abn == TRUE)
+write.csv(df_global_significativa, paste0(dir_abundances, "Table_ANCOM_Global_Robust_Signif.csv"), row.names = FALSE)
+
+cat(paste0(" >> ANCOM-BC2 completado. Se detectaron ", length(taxones_robust_globales), " géneros con variación global robusta.\n"))
 
 matriz_ancom_log <- as.data.frame(output$bias_correct_log_table)
 
@@ -202,7 +292,7 @@ matriz_ancom_log_imputada <- as.data.frame(lapply(matriz_ancom_log, function(x) 
 rownames(matriz_ancom_log_imputada) <- rownames(matriz_ancom_log)
 
 df_bacterias <- as.data.frame(t(matriz_ancom_log_imputada))
-bacterias_ancom <- df_global$taxon[df_global$diff_abn == TRUE]
+bacterias_ancom <- df_global$taxon[df_global$diff_robust_abn == TRUE]
 df_bacterias_filtrado <- df_bacterias[, bacterias_ancom, drop = FALSE]
 colnames(df_bacterias_filtrado) <- gsub("-", "_", colnames(df_bacterias_filtrado))
 
@@ -309,10 +399,17 @@ if(exists("bacterias_sig_uni_global") && length(bacterias_sig_uni_global) > 0) {
 }
 
 # ==============================================================================
-# SECTION 7: ADVANCED VISUALIZATIONS (AGE-ADJUSTED MEGABOXPLOTS)
+# SECTION 7: ADVANCED VISUALIZATIONS (2x5 GRID & FIXED ANNOTATIONS - GUT)
 # ==============================================================================
-print("--- RENDERING CLEAN AGE-ADJUSTED MEGABOXPLOTS ---")
+print("--- RENDERING CLEAN AGE-ADJUSTED MEGABOXPLOTS (2x5 GRID) ---")
 
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+# 1. Copiamos y homogeneizamos nombres en la matriz de bacterias original
 df_bacterias_cambio <- df_bacterias
 for(b in bacterias_ancom) {
   col_original <- colnames(df_bacterias_cambio)[grep(paste0("^", gsub("-", ".", b)), colnames(df_bacterias_cambio))]
@@ -326,30 +423,133 @@ df_base_ajuste <- metadata_base %>%
   dplyr::select(-any_of("Sample_ID")) %>% tibble::rownames_to_column("Sample_ID") %>%
   dplyr::left_join(df_bacterias_cambio, by = "Sample_ID") %>% mutate(Age = as.numeric(Age))
 
-bacterias_procesar <- gsub("Burkholderia-Caballeronia-Paraburkholderia", "Burkholderia", bacterias_ancom)
-colnames(df_base_ajuste) <- gsub("Burkholderia-Caballeronia-Paraburkholderia", "Burkholderia", colnames(df_base_ajuste))
+# --- TRATAMIENTO SEGURO DE CARACTERES ---
+bacterias_mapeo <- tibble(
+  Original = bacterias_ancom,
+  Seguro   = make.names(bacterias_ancom)
+)
 
-bacterias_procesar <- make.names(bacterias_procesar)
-colnames(df_base_ajuste) <- make.names(colnames(df_base_ajuste))
-
-for (bac in bacterias_procesar) {
-  formula_res <- as.formula(paste0("`", bac, "` ~ Age"))
-  fit_res     <- lm(formula_res, data = df_base_ajuste, na.action = na.exclude)
-  df_base_ajuste[[paste0(bac, "_adj")]] <- residuals(fit_res) + mean(df_base_ajuste[[bac]], na.rm = TRUE)
+for(i in 1:nrow(bacterias_mapeo)){
+  colnames(df_base_ajuste)[colnames(df_base_ajuste) == bacterias_mapeo$Original[i]] <- bacterias_mapeo$Seguro[i]
 }
 
-columnas_adj <- paste0(bacterias_procesar, "_adj")
+for (bac_segura in bacterias_mapeo$Seguro) {
+  formula_res <- as.formula(paste0("`", bac_segura, "` ~ Age"))
+  fit_res     <- lm(formula_res, data = df_base_ajuste, na.action = na.exclude)
+  df_base_ajuste[[paste0(bac_segura, "_adj")]] <- residuals(fit_res) + mean(df_base_ajuste[[bac_segura]], na.rm = TRUE)
+}
+
+columnas_adj <- paste0(bacterias_mapeo$Seguro, "_adj")
 df_long_adj <- df_base_ajuste %>%
-  select(Sample_ID, Clinical_Group, Age, all_of(columnas_adj)) %>%
-  pivot_longer(cols = all_of(columnas_adj), names_to = "Bacteria", values_to = "Abundancia_Adjusted") %>%
-  mutate(Bacteria = gsub("_adj$", "", Bacteria), Bacteria = gsub("\\.", "-", Bacteria))
+  dplyr::select(Sample_ID, Clinical_Group, Age, all_of(columnas_adj)) %>%
+  tidyr::pivot_longer(cols = all_of(columnas_adj), names_to = "Bacteria_Segura", values_to = "Abundancia_Adjusted") %>%
+  dplyr::mutate(Bacteria_Segura = gsub("_adj$", "", Bacteria_Segura)) %>%
+  dplyr::left_join(bacterias_mapeo, by = c("Bacteria_Segura" = "Seguro")) %>%
+  dplyr::select(Sample_ID, Clinical_Group, Age, Bacteria = Original, Abundancia_Adjusted)
 
+# ==============================================================================
+# 1. MATRIZ DE ASTERISCOS - TRADUCCIÓN EXACTA BASADA EN EL INTERCEPTO (CTRL)
+# ==============================================================================
+# Extraemos el valor máximo real de cada faceta para que sirva de base de altura
+df_max_valores <- df_long_adj %>%
+  dplyr::group_by(Bacteria) %>%
+  dplyr::summarise(max_val = max(Abundancia_Adjusted, na.rm = TRUE), .groups = "drop")
+
+df_p_annotations <- tabla_ancom_grupos %>%
+  dplyr::filter(`p-value` < 0.05) %>%
+  dplyr::mutate(Bacteria = Genus) %>%  
+  dplyr::mutate(
+    # LÓGICA ESTRICTA: 
+    # Si NO hay guion bajo, es una comparación directa del Intercepto (CTRL) vs ese grupo.
+    # Si SÍ hay guion bajo, separamos de forma limpia el grupo 1 del grupo 2.
+    group1 = case_when(
+      str_detect(Comparacion_Especifica, "_") ~ str_split_i(Comparacion_Especifica, "_", 1),
+      TRUE                                    ~ "CTRL"
+    ),
+    group2 = case_when(
+      str_detect(Comparacion_Especifica, "_") ~ str_split_i(Comparacion_Especifica, "_", 2),
+      TRUE                                    ~ Comparacion_Especifica
+    )
+  ) %>%
+  # Filtro de seguridad por si acaso quedara alguna autocomparación huérfana
+  dplyr::filter(group1 != group2) %>% 
+  # Mapeo clásico de significancia por asteriscos
+  dplyr::mutate(label = case_when(
+    `p-value` < 0.001 ~ "***",
+    `p-value` < 0.01  ~ "**",
+    TRUE              ~ "*"
+  )) %>%
+  dplyr::select(Bacteria, group1, group2, label) %>%
+  dplyr::inner_join(df_max_valores, by = "Bacteria") %>% 
+  
+  # ESCALONAMIENTO SEGURO: 
+  # Si una bacteria (ej. Blautia) tiene varias comparaciones significativas, 
+  # subimos cada bracket un "piso" (0.15 de margen incremental) para que no se pisen entre ellos.
+  dplyr::group_by(Bacteria) %>%
+  dplyr::mutate(idx = row_number()) %>%
+  dplyr::mutate(y.position = max_val + (abs(max_val) * (0.05 + (idx - 1) * 0.15))) %>%
+  dplyr::ungroup()
+
+# ==============================================================================
+# 2. GENERACIÓN DINÁMICA DE LETRAS DE PANEL (A-J)
+# ==============================================================================
+bacterias_ordenadas <- sort(unique(df_long_adj$Bacteria))
+df_letras_paneles <- tibble(
+  Bacteria = bacterias_ordenadas,
+  Letra = letters[1:length(bacterias_ordenadas)] 
+)
+
+# ==============================================================================
+# 3. CONSTRUCCIÓN DEL PLOT (CUADRÍCULA OPTIMIZADA DE 2 COLUMNAS x 5 FILAS)
+# ==============================================================================
 plot_boxplots_clean <- ggplot(df_long_adj, aes(x = Clinical_Group, y = Abundancia_Adjusted, fill = Clinical_Group)) +
-  geom_boxplot(alpha = 0.7, outlier.shape = NA, width = 0.6) + geom_jitter(width = 0.15, alpha = 0.3, color = "black", size = 0.9) +
-  facet_wrap(~ Bacteria, scales = "free_y", ncol = 3) + theme_bw() + scale_fill_brewer(palette = "Set2") +
-  labs(x = NULL, y = "Age-Adjusted Abundance (Residuals + Mean)", title = "Gut Bacterial Abundance Dynamics by Clinical Group", subtitle = "Linear Adjustment by Age") + 
-  theme(legend.position = "none", plot.title = element_text(face = "bold", size = 14, hjust = 0.5), plot.subtitle = element_text(size = 11, hjust = 0.5, face = "italic"),
-        axis.text.x = element_text(angle = 45, hjust = 1, size = 9), panel.grid.minor = element_blank(),
-        strip.background = element_rect(fill = "#f8f9fa", color = "gray80"), strip.text = element_text(color = "black", face = "bold", size = 10))
+  geom_boxplot(alpha = 0.7, outlier.shape = NA, width = 0.6) + 
+  geom_jitter(width = 0.15, alpha = 0.3, color = "black", size = 1.0) +
+  # CAMBIO CLAVE: Cambiado de ncol = 3 a ncol = 2
+  facet_wrap(~ Bacteria, scales = "free_y", ncol = 2) + 
+  theme_bw() + 
+  scale_fill_brewer(palette = "Set2") +
+  
+  labs(
+    x = NULL, 
+    y = "Bias-Corrected Age-Adjusted Abundance (ANCOM-BC2 Residuals)"
+  ) + 
+  
+  theme(
+    legend.position = "none",
+    axis.title.y = element_text(face = "bold", size = 14, margin = margin(r = 10)),
+    axis.text.y  = element_text(size = 11, color = "black"),
+    axis.text.x  = element_text(angle = 45, hjust = 1, size = 12, face = "bold", color = "black"), 
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray95"),
+    strip.background = element_rect(fill = "#f8f9fa", color = "gray80"), 
+    strip.text = element_text(color = "black", face = "bold.italic", size = 13) 
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.22))) 
 
-ggsave(filename = paste0(dir_abundances, "Plot_MegaBoxplot_Minimal.png"), plot = plot_boxplots_clean, width = 12, height = 9, dpi = 300)
+# Inyección de letras de panel
+plot_boxplots_clean <- plot_boxplots_clean +
+  geom_text(
+    data = df_letras_paneles,
+    aes(label = Letra),
+    x = -Inf, y = Inf, hjust = -0.5, vjust = 1.5,
+    inherit.aes = FALSE, fontface = "bold", size = 6, color = "black"
+  )
+
+# Inyección de brackets y asteriscos corregidos
+if (nrow(df_p_annotations) > 0) {
+  plot_boxplots_clean <- plot_boxplots_clean +
+    stat_pvalue_manual(
+      data = df_p_annotations,
+      label = "label",
+      y.position = "y.position",
+      step.increase = 0.13, 
+      hide.ns = TRUE,
+      tip.length = 0.02,
+      size = 5
+    )
+}
+
+# Guardamos el TIFF modificando las dimensiones (más estrecho y más alto para el layout 2x5)
+ggsave(filename = paste0(dir_abundances, "Figure_Microbiome_Dynamics.tiff"), 
+       plot = plot_boxplots_clean, width = 11, height = 18, dpi = 300, device = "tiff")

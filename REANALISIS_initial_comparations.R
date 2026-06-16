@@ -172,13 +172,21 @@ unique_colors <- head(colores_vivos, color_count)
 names(unique_colors) <- taxa_sin_other
 unique_colors["Other"] <- "#b3b3b3" 
 
+# Variable que formatea el taxón largo dividiéndolo por guiones o espacios en saltos de línea
+taxa_label_formatter <- function(labels) {
+  labels <- as.character(labels)
+  # Buscamos el nombre largo y lo rompemos metiendo saltos de línea (\n) donde quieras
+  labels[labels == "Burkholderia-Caballeronia-Paraburkholderia"] <- "Burkholderia-\n Caballeronia-\n Paraburkholderia"
+  return(labels)
+}
+
 # --- PANEL 1: NPA PLOT ---
 df_npa_plot <- df_long_all %>% filter(Sample_Type == "NPA") %>%
   group_by(Patient_ID, Condicion_Clinica, Taxon_Final) %>% summarise(Abundance = sum(Abundance), .groups = 'drop')
 
 p_npa <- ggplot(df_npa_plot, aes(x = Patient_ID, y = Abundance, fill = Taxon_Final)) +
   geom_bar(stat = "identity", width = 0.9) +
-  scale_fill_manual(values = unique_colors, name = "Microbiota Genus") +
+  scale_fill_manual(values = unique_colors, name = "Microbiota Genus", labels = taxa_label_formatter) +
   scale_x_discrete(drop = FALSE) + 
   theme_minimal() +
   labs(title = "Nasopharyngeal Aspirate Profile (NPA)", y = "Relative Abundance (%)", x = NULL) +
@@ -197,7 +205,7 @@ df_gut_plot <- df_long_all %>% filter(Sample_Type == "GUT") %>%
 
 p_gut <- ggplot(df_gut_plot, aes(x = Patient_ID, y = Abundance, fill = Taxon_Final)) +
   geom_bar(stat = "identity", width = 0.9) +
-  scale_fill_manual(values = unique_colors, name = "Microbiota Genus") +
+  scale_fill_manual(values = unique_colors, name = "Microbiota Genus", labels = taxa_label_formatter)+
   scale_x_discrete(drop = FALSE) + 
   theme_minimal() +
   labs(title = "Gut Microbiota Profile (GUT)", y = "Relative Abundance (%)", x = NULL) +
