@@ -304,17 +304,24 @@ df_final_modelo <- metadata_base %>%
   dplyr::left_join(df_bacterias_filtrado, by = "Sample_ID")
 
 # ==============================================================================
-# SECTION 6: RISK MODELS - GLOBAL BRONCHIOLITIS SUBSET & MULTIVARIATE FOREST PLOT
+# SECTION 6: INTEGRATED RISK MODELS PANEL (UNIVARIATE, MULTIVARIATE & ROC)
 # ==============================================================================
-print("--- RUNNING RISK MODELS FOR TOTAL BRONCHIOLITIS ---")
+print("--- RUNNING INTEGRATED RISK MODELS FOR TOTAL BRONCHIOLITIS ---")
+
+library(ggplot2)
+library(dplyr)
+library(broom)
+library(pROC)
+library(patchwork)
+library(stringr)
 
 df_model_bql <- df_final_modelo[df_final_modelo$Bronchiolitis == "Yes", ]
 df_model_bql$Wheezing_Bin <- ifelse(df_model_bql$Wheezing.treatment == "Yes", 1, 0)
 df_model_bql$Age <- as.numeric(df_model_bql$Age)
 
 bacterias_presentes <- setdiff(intersect(colnames(df_bacterias_filtrado), colnames(df_model_bql)), "Sample_ID")
-
-# 6.1 Univariate Model
+bacterias_presentes
+# --- 6.1 UNIVARIATE MODELS (CON PARSEO ROBUSTO DE CARACTERES ESPECIALES) ---
 lista_resultados_global <- list()
 for (bac in bacterias_presentes) {
   if(length(unique(df_model_bql[[bac]])) < 2) next
@@ -324,12 +331,22 @@ for (bac in bacterias_presentes) {
   modelo_u  <- tryCatch(glm(formula_u, data = df_model_bql, family = binomial), error = function(e) NULL)
   
   if(!is.null(modelo_u)) {
-    res <- tryCatch(tidy(modelo_u, exponentiate = TRUE, conf.int = TRUE), error = function(e) tidy(modelo_u, exponentiate = TRUE, conf.int = FALSE))
-    lista_resultados_global[[bac]] <- res %>% filter(term == bac) %>% mutate(Bacteria = bac)
+    res <- tryCatch(tidy(modelo_u, exponentiate = TRUE, conf.int = TRUE), 
+                    error = function(e) tidy(modelo_u, exponentiate = TRUE, conf.int = FALSE))
+    
+    # SOLUCIÓN CLAVE: Limpiamos los backticks (`) que introduce R en la columna 'term' antes de filtrar
+    res <- res %>% mutate(term_clean = gsub("`", "", term))
+    
+    lista_resultados_global[[bac]] <- res %>% 
+      filter(term_clean == bac) %>% 
+      mutate(Bacteria = bac) %>%
+      select(-term_clean) # Removemos la columna temporal
   }
 }
 tabla_univariada_global <- bind_rows(lista_resultados_global)
 
+# --- 6.2 PLOT A: UNIVARIATE FOREST PLOT (PUBLICATION QUALITY) ---
+plot_forest_uni <- ggplot()
 if(nrow(tabla_univariada_global) > 0) {
   tabla_univariada_global <- tabla_univariada_global %>%
     select(Bacteria, `Odds Ratio (OR)` = estimate, `Lower CI (2.5%)` = conf.low, `Upper CI (97.5%)` = conf.high, `p-value` = p.value)
@@ -337,67 +354,117 @@ if(nrow(tabla_univariada_global) > 0) {
   
   bacterias_sig_uni_global <- tabla_univariada_global %>% filter(`p-value` < 0.05) %>% pull(Bacteria)
   
-  # Plot Univariate
-  tabla_univariada_global$Bacteria <- factor(tabla_univariada_global$Bacteria, levels = rev(tabla_univariada_global$Bacteria))
-  plot_forest_uni_g <- ggplot(tabla_univariada_global, aes(x = `Odds Ratio (OR)`, y = Bacteria)) +
-    geom_vline(xintercept = 1, linetype = "dashed", color = "red", size = 0.8) +
-    geom_errorbarh(aes(xmin = `Lower CI (2.5%)`, xmax = `Upper CI (97.5%)`), height = 0.2, color = "#34495e", size = 0.8) +
-    geom_point(size = 3.5, color = "#2980b9") + theme_minimal() +
-    labs(title = "Forest Plot: Univariate Predictors (Total Bronchiolitis)", subtitle = "Adjusted by Age", x = "Odds Ratio (Log Scale)", y = "") +
-    scale_x_log10() + theme(plot.title = element_text(face="bold", hjust=0.5), plot.subtitle = element_text(hjust=0.5))
-  ggsave(paste0(dir_models, "Plot_ForestPlot_Univariate.png"), plot = plot_forest_uni_g, width = 8, height = 6, dpi = 300)
+  tabla_univariada_global <- tabla_univariada_global %>%
+    mutate(Bacteria_Clean = gsub("_", "-\n", Bacteria))
+  
+  tabla_univariada_global$Bacteria_Clean <- factor(tabla_univariada_global$Bacteria_Clean, 
+                                                   levels = rev(sort(unique(tabla_univariada_global$Bacteria_Clean))))
+  # Limpieza: quitamos '_group' antes de aplicar el salto de línea
+  tabla_univariada_global <- tabla_univariada_global %>% 
+    mutate(Bacteria_Clean = gsub("_", "-\n", gsub("_group", "", Bacteria)))
+  
+  plot_forest_uni <- ggplot(tabla_univariada_global, aes(x = `Odds Ratio (OR)`, y = Bacteria_Clean)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "#d63031", size = 0.8) +
+    geom_errorbarh(aes(xmin = `Lower CI (2.5%)`, xmax = `Upper CI (97.5%)`), height = 0.2, color = "#2c3e50", size = 0.8) +
+    geom_point(size = 3.5, color = "#2980b9") + 
+    theme_bw(base_size = 12) +
+    labs(x = "Odds Ratio (95% CI)", y = NULL) + # Sin subtítulo
+    scale_x_log10() + 
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(color = "#f0f0f0"),
+          axis.title.x = element_text(face = "bold", size = 14, margin = margin(t = 10)),
+          axis.text.y = element_text(face = "italic", color = "black", size = 12, lineheight = 0.85),
+          axis.text.x = element_text(color = "black", size = 12))
 }
 
-# 6.2 Multivariate Model, ROC Validation & Forest Plot
+# --- 6.3 PLOT B: MULTIVARIATE FOREST PLOT (PUBLICATION QUALITY) ---
+plot_forest_multi <- ggplot()
 if(exists("bacterias_sig_uni_global") && length(bacterias_sig_uni_global) > 0) {
   formula_m_g <- as.formula(paste("Wheezing_Bin ~ Age +", paste(paste0("`", bacterias_sig_uni_global, "`"), collapse = " + ")))
   modelo_m_g   <- glm(formula_m_g, data = df_model_bql, family = binomial, na.action = na.exclude)
   
   tabla_m_g <- tidy(modelo_m_g, exponentiate = TRUE, conf.int = TRUE) %>% 
     filter(term != "(Intercept)") %>%
-    mutate(Variable = sapply(term, function(x) {
-      x_clean <- gsub("`", "", x)
-      if(x_clean == "Age") return("Age")
-      idx <- grep(paste0("^", gsub("-", ".", x_clean)), gsub("-", ".", bacterias_ancom))
-      if(length(idx) > 0) return(bacterias_ancom[idx[1]]) else return(x_clean)
-    })) %>%
-    select(Variable, `Odds Ratio (OR)` = estimate, `Lower CI (2.5%)` = conf.low, `Upper CI (97.5%)` = conf.high, `p-value` = p.value)
-  
+    select(term, `Odds Ratio (OR)` = estimate, `Lower CI (2.5%)` = conf.low, `Upper CI (97.5%)` = conf.high, `p-value` = p.value)
   write.csv(tabla_m_g, paste0(dir_models, "Table_Multivariate_Model_Definitive.csv"), row.names = FALSE)
   
-  # Validación de Curva ROC
+  tabla_m_g_plot <- tabla_m_g %>% 
+    mutate(
+      Bacteria = gsub("`|`", "", term),
+      Bacteria_Clean = ifelse(Bacteria == "Age", "Age\n(Adjustment)", gsub("_", "-\n", Bacteria))
+    )
+  
+  tabla_m_g_plot$Bacteria_Clean <- factor(tabla_m_g_plot$Bacteria_Clean, 
+                                          levels = rev(sort(unique(tabla_m_g_plot$Bacteria_Clean))))
+  # Limpieza: quitamos '_group' antes de aplicar el salto de línea
+  tabla_m_g_plot <- tabla_m_g %>% 
+    mutate(
+      Bacteria = gsub("`|`", "", term),
+      Bacteria_Clean = ifelse(Bacteria == "Age", "Age\n(Adjustment)", gsub("_", "-\n", gsub("_group", "", Bacteria)))
+    )
+  
+  plot_forest_multi <- ggplot(tabla_m_g_plot, aes(x = `Odds Ratio (OR)`, y = Bacteria_Clean)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "#d63031", size = 0.8) +
+    geom_errorbarh(aes(xmin = `Lower CI (2.5%)`, xmax = `Upper CI (97.5%)`), height = 0.2, color = "#2c3e50", size = 0.8) +
+    geom_point(size = 3.5, color = "#27ae60") + 
+    theme_bw(base_size = 12) +
+    labs(x = "Odds Ratio (95% CI)", y = NULL) + # Sin subtítulo
+    scale_x_log10() + 
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(color = "#f0f0f0"),
+          axis.title.x = element_text(face = "bold", size = 14, margin = margin(t = 10)),
+          axis.text.y = element_text(face = "italic", color = "black", size = 12, lineheight = 0.85),
+          axis.text.x = element_text(color = "black", size = 12))
+  
+  # --- 6.4 PLOT C: ROC CURVE (PUBLICATION QUALITY) ---
   df_model_bql$probabilidades <- predict(modelo_m_g, type = "response")
   df_roc_g <- df_model_bql %>% filter(!is.na(probabilidades) & !is.na(Wheezing_Bin))
   objeto_roc_g <- roc(df_roc_g$Wheezing_Bin, df_roc_g$probabilidades, levels = c(0, 1), direction = "<", quiet = TRUE)
   auc_ci_g <- ci.auc(objeto_roc_g)
   
-  png(filename = paste0(dir_models, "Plot_ROC_Curve_Multivariate.png"), width = 2000, height = 1800, res = 300)
-  plot(objeto_roc_g, col = "#1f77b4", lwd = 3, main = paste0("ROC Curve (Total Bronchiolitis)\nAUC = ", round(auc_ci_g[2], 3)), identity.col = "grey", identity.lty = 2)
-  grid()
-  dev.off()
+  df_coords_roc <- coords(objeto_roc_g, "all", transpose = FALSE) %>%
+    as.data.frame() %>%
+    mutate(One_Minus_Specificity = 1 - specificity) %>%
+    select(One_Minus_Specificity, sensitivity) %>%
+    rbind(data.frame(One_Minus_Specificity = c(0, 1), sensitivity = c(0, 1))) %>%
+    arrange(One_Minus_Specificity, sensitivity) %>%
+    distinct()
   
-  # Generación del Forest Plot Multivariante 
-  variables_ordenadas  <- unique(tabla_m_g$Variable)
-  tabla_m_g$Variable   <- factor(tabla_m_g$Variable, levels = rev(variables_ordenadas))
+  texto_auc <- paste0("AUC = ", round(auc_ci_g[2], 3), " (95% CI: ", round(auc_ci_g[1], 3), "-", round(auc_ci_g[3], 3), ")")
   
-  plot_forest_multi <- ggplot(tabla_m_g, aes(x = `Odds Ratio (OR)`, y = Variable)) +
-    geom_vline(xintercept = 1, linetype = "dashed", color = "red", size = 0.8) +
-    geom_errorbarh(aes(xmin = `Lower CI (2.5%)`, xmax = `Upper CI (97.5%)`), height = 0.2, color = "#2c3e50", size = 0.8) +
-    geom_point(size = 4, color = "#16a085") + 
-    theme_minimal() +
-    labs(title    = "Forest Plot: Multivariate Predictors of Recurrent Wheezing",
-         subtitle = paste0("Model Adjusted by Age (AUC = ", round(auc_ci_g[2], 3), ")"), 
-         x        = "Odds Ratio (Log Scale)", y        = "") +
-    scale_x_log10() + 
-    theme(text = element_text(size = 13), 
-          plot.title = element_text(face = "bold", hjust = 0.5),
-          plot.subtitle = element_text(hjust = 0.5), 
-          panel.grid.minor = element_blank())
-  
-  ggsave(paste0(dir_models, "Plot_ForestPlot_Multivariate.png"), plot = plot_forest_multi, width = 8, height = 5, dpi = 300)
-  print("--- TABLA Y FOREST PLOT MULTIVARIANTE GENERADOS CON ÉXITO ---")
+  plot_roc <- ggplot(df_coords_roc, aes(x = One_Minus_Specificity, y = sensitivity)) +
+    geom_segment(aes(x = 0, y = 0, xend = 1, yend = 1), linetype = "dashed", color = "grey60", size = 0.6) +
+    geom_path(color = "#1f77b4", size = 1.3, lineend = "round") +
+    scale_x_continuous(expand = c(0.01, 0.01), limits = c(0, 1), breaks = seq(0, 1, 0.2)) + 
+    scale_y_continuous(expand = c(0.01, 0.01), limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+    theme_bw(base_size = 12) +
+    labs(x = "1 - Specificity", y = "Sensitivity") + # Sin subtítulo
+    annotate("text", x = 0.75, y = 0.15, label = texto_auc, size = 5, fontface = "bold", color = "#2c3e50") +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(color = "#f0f0f0"),
+          axis.title.x = element_text(face = "bold", size = 14, margin = margin(t = 10)),
+          axis.title.y = element_text(face = "bold", size = 14, margin = margin(r = 10)),
+          axis.text = element_text(color = "black", size = 12))
 }
 
+# ==============================================================================
+# 6.5 ASSEMBLE INTEGRATED PRESTIGE PANEL
+# ==============================================================================
+if (exists("plot_roc")) {
+  integrated_risk_panel <- (plot_forest_uni | plot_forest_multi) / plot_roc +
+    plot_layout(heights = c(1, 1.2)) +
+    plot_annotation(tag_levels = 'a') & 
+    theme(plot.tag = element_text(face = "bold", size = 18, color = "#2c3e50")) # Etiquetas de paneles grandes (a, b, c)
+  
+  ggsave(
+    filename = paste0(dir_models, "Figure3_GUT_Risk_Models_Integrated_Panel.png"), 
+    plot = integrated_risk_panel, 
+    width = 11, 
+    height = 10, 
+    dpi = 300
+  )
+  print(" >> [SUCCESS] Integrated Risk Models Panel saved beautifully in publication format.")
+}
 # ==============================================================================
 # SECTION 7: ADVANCED VISUALIZATIONS (2x5 GRID & FIXED ANNOTATIONS - GUT)
 # ==============================================================================

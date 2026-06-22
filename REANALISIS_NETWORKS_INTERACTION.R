@@ -661,3 +661,210 @@ if (vcount(g_cross_sub) > 0 && ecount(g_cross_sub) > 0) {
 }
 
 cat("\n[Pipeline Finalizado de forma Exitosa. Estructura ordenada y robusta].\n")
+# ==============================================================================
+# SECCIÓN ADICIONAL: GENERACIÓN DE FIGURA INTEGRADA MÁSTER (Figure_5) - FIJADA
+# ==============================================================================
+cat("\n[Figuras] Generando la Figura 5 Integrada con maximización real de espacio...\n")
+
+library(cowplot)
+library(grid)
+library(RColorBrewer)
+
+# --- PANEL A: Red de Nasofaringe (NPA) (Layout Original + Enlaces Gruesos) ---
+g_npa_fig5 <- delete_vertices(g_npa, V(g_npa)[V(g_npa)$module == 0])
+
+# Mantenemos el salto de línea SOLO en los nombres de las bacterias (nodos)
+V(g_npa_fig5)$label <- gsub("([-_])", "\\1\n", V(g_npa_fig5)$name)
+
+# Estética de Enlaces
+E(g_npa_fig5)$color <- ifelse(E(g_npa_fig5)$weight > 0, "#2ecc71DD", "#e74c3cDD")
+
+# Enlaces más gruesos respetando la proporción original que pediste
+E(g_npa_fig5)$width <- abs(E(g_npa_fig5)$weight) * 8.5
+V(g_npa_fig5)$size  <- 4 + (log_mean_npa[V(g_npa_fig5)$name] * 1.5)
+
+# Paleta dinámica
+unique_npa_mods5 <- sort(unique(V(g_npa_fig5)$module))
+n_mods <- length(unique_npa_mods5)
+colores_dinamicos <- colorRampPalette(brewer.pal(min(8, n_mods), "Set1"))(n_mods)
+color_map_npa5    <- setNames(paste0(colores_dinamicos, "E6"), unique_npa_mods5)
+V(g_npa_fig5)$color_node <- color_map_npa5[as.character(V(g_npa_fig5)$module)]
+
+p_network_a <- ~{
+  # Dejamos una proporción bien balanceada
+  layout(matrix(c(1,2), nrow=1), widths=c(3.8, 0.9))
+  
+  # Quitamos márgenes exteriores por completo en el plot de la red
+  par(mar=c(0, 0, 0, 0), bg="white")
+  set.seed(42)
+  
+  # MODIFICACIÓN CRÍTICA: Forzamos límites xlim e ylim expandidos y desactivamos el 
+  # auto-escalado rígido para que la red aproveche los extremos laterales.
+  plot(g_npa_fig5, 
+       layout=layout_with_fr(g_npa_fig5, weights=abs(E(g_npa_fig5)$weight)), 
+       vertex.color=V(g_npa_fig5)$color_node, 
+       vertex.size=V(g_npa_fig5)$size, 
+       vertex.frame.color="#1a252f", 
+       vertex.frame.width=0.9,
+       vertex.label=V(g_npa_fig5)$label, 
+       vertex.label.cex=0.85,          
+       vertex.label.font=2, 
+       vertex.label.color="#2c3e50",
+       rescale=TRUE,                 # Permite que responda a los límites
+       xlim=c(-1, 1),            # Estira el lienzo horizontalmente hacia la derecha
+       ylim=c(-1.0, 1.0))            # Centra verticalmente ajustado
+  
+  # Leyendas del Grafo corregidas (Módulos planos en una línea)
+  par(mar=c(1, 0, 1, 1))
+  plot.new()
+  
+  # Leyenda de Módulos (Plana)
+  legend(x = "center", y = 0.85, legend=paste("Mod", names(color_map_npa5)), 
+         col=color_map_npa5, pch=19, bty="n", title="Modules", cex=1, title.font=2, y.intersp=1.2)
+  
+  # Leyenda de Interacciones
+  legend(x = "top", y = 0.95, legend=c("Alignment (+)", "Exclusion (-)"), 
+         col=c("#2ecc71", "#e74c3c"), lty=1, lwd=6, bty="n", title="Interactions", cex=1.1, title.font=2, y.intersp=1.2)
+}
+
+
+# --- PANEL B: Heatmap Clínico (Módulos estrictamente en una sola línea) ---
+p_heatmap_b <- ggplot(regression_results, aes(x = Predictor, y = Module, fill = Effect_Size)) +
+  geom_tile(color = "white", lwd = 0.6) +
+  geom_text(aes(label = Cell_Text), color = "black", size = 4.0, fontface = "bold") + 
+  scale_fill_gradient2(low = "#2c3e50", mid = "#f1c40f", high = "#d35400", midpoint = 0, 
+                       name = "Standardized\nEffect Size (β)") +
+  theme_minimal(base_size = 14) + 
+  labs(x = "Patient Clinical Traits & Contextual Covariates", 
+       y = "Structural Network Discovery Modules") +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, face = "bold", color = "#1a252f", size = 12),
+        axis.text.y = element_text(face = "bold", color = "#1a252f", size = 12), 
+        axis.title.x = element_text(face = "bold", size = 13, margin = margin(t = 10)),
+        axis.title.y = element_text(face = "bold", size = 13, margin = margin(r = 15)),
+        panel.grid = element_blank(),
+        plot.title = element_blank(), 
+        legend.title = element_text(face = "bold", size = 11),
+        legend.position = "right",
+        plot.margin = margin(t = 5, r = 5, b = 5, l = 15, unit = "pt"))
+
+
+# --- COMBINACIÓN Y GUARDADO DE FIGURE_5 ---
+figure_5_final <- plot_grid(
+  p_network_a, 
+  p_heatmap_b, 
+  labels = c("a", "b"), 
+  label_size = 20, 
+  label_fontface = "bold",
+  ncol = 1, 
+  rel_heights = c(1.3, 1.0)
+)
+
+ggsave(
+  filename = paste0(output_dir_nets, "Figure_5.png"), 
+  plot = figure_5_final, 
+  width = 12, 
+  height = 16, 
+  dpi = 300, 
+  bg = "white"
+)
+cat("  >> [Éxito] Figure_5 guardada maximizando realmente el espacio horizontal.\n")
+# ==============================================================================
+# GENERACIÓN DE LA SUPPLEMENTARY FIGURE 5: RED DE INTESTINO (GUT)
+# ==============================================================================
+cat("\n[Figuras] Generando la Supplementary Figure 5 (Red GUT Independiente)...\n")
+
+library(RColorBrewer)
+
+g_gut_supp5 <- delete_vertices(g_gut, V(g_gut)[V(g_gut)$module == 0])
+V(g_gut_supp5)$label <- gsub("([-_])", "\\1\n", V(g_gut_supp5)$name)
+
+E(g_gut_supp5)$color <- ifelse(E(g_gut_supp5)$weight > 0, "#2ecc71DD", "#e74c3cDD")
+E(g_gut_supp5)$width <- abs(E(g_gut_supp5)$weight) * 8.5
+V(g_gut_supp5)$size  <- 5 + (log_mean_gut[V(g_gut_supp5)$name] * 1.5)
+
+unique_gut_mods5 <- sort(unique(V(g_gut_supp5)$module))
+n_mods_gut5 <- length(unique_gut_mods5)
+colores_gut5 <- colorRampPalette(brewer.pal(min(8, n_mods_gut5), "Dark2"))(n_mods_gut5)
+color_map_gut5 <- setNames(paste0(colores_gut5, "E6"), unique_gut_mods5)
+V(g_gut_supp5)$color_node <- color_map_gut5[as.character(V(g_gut_supp5)$module)]
+
+# Guardado en alta resolución con formato rectangular óptimo
+out_supp5 <- paste0(output_dir_nets, "Supplementary_Figure_5.png")
+png(out_supp5, width = 3400, height = 2400, res = 300)
+
+layout(matrix(c(1,2), nrow=1), widths=c(3.9, 0.9))
+par(mar=c(1, 1, 1, 1), bg="white")
+set.seed(88)
+
+# El algoritmo FR ahora tiene todo el lienzo horizontal para distribuir los nodos conexos
+plot(g_gut_supp5, 
+     layout=layout_with_fr(g_gut_supp5, weights=abs(E(g_gut_supp5)$weight), grid="nogrid"), 
+     vertex.color=V(g_gut_supp5)$color_node, 
+     vertex.size=V(g_gut_supp5)$size, 
+     vertex.frame.color="#1a252f", 
+     vertex.frame.width=0.9,
+     vertex.label=V(g_gut_supp5)$label, 
+     vertex.label.cex=0.82,          
+     vertex.label.font=2, 
+     vertex.label.color="#2c3e50")
+
+par(mar=c(1, 0, 1, 1))
+plot.new()
+legend(x = "center", y = 0.85, legend=paste("Mod", names(color_map_gut5)), 
+       col=color_map_gut5, pch=19, bty="n", title="GUT Modules", cex=1.1, title.font=2, y.intersp=1.3)
+legend(x = "bottom", y = 0.15, legend=c("Alignment (+)", "Exclusion (-)"), 
+       col=c("#2ecc71", "#e74c3c"), lty=1, lwd=6, bty="n", title="Interactions", cex=1.1, title.font=2, y.intersp=1.3)
+
+dev.off()
+cat("  >> [Éxito] Supplementary_Figure_5 guardada correctamente.\n")
+
+# ==============================================================================
+# GENERACIÓN DE LA SUPPLEMENTARY FIGURE 6: RED INTER-NICHO (CROSS-DOMAIN)
+# ==============================================================================
+cat("\n[Figuras] Generando la Supplementary Figure 6 (Red Cross-Domain Filtrada)...\n")
+
+v_tissue_all <- V(g_cross)$tissue
+el_all <- as_edgelist(g_cross, names = FALSE)
+is_cross_edge_all <- (v_tissue_all[el_all[,1]] != v_tissue_all[el_all[,2]])
+nodes_with_cross <- unique(c(el_all[is_cross_edge_all, 1], el_all[is_cross_edge_all, 2]))
+
+g_cross_filtered <- subgraph(g_cross, nodes_with_cross)
+V(g_cross_filtered)$label <- gsub("([-_])", "\\1\n", V(g_cross_filtered)$name)
+
+v_tissue_f <- V(g_cross_filtered)$tissue
+el_f <- as_edgelist(g_cross_filtered, names = FALSE)
+is_cross_edge_f <- (v_tissue_f[el_f[,1]] != v_tissue_f[el_f[,2]])
+
+E(g_cross_filtered)$width <- abs(E(g_cross_filtered)$weight) * 12
+E(g_cross_filtered)$color <- ifelse(E(g_cross_filtered)$weight > 0, "#2ecc71DD", "#e74c3cDD")
+g_cross_final_plot <- delete_edges(g_cross_filtered, which(!is_cross_edge_f))
+
+# Guardado independiente en alta resolución
+out_supp6 <- paste0(output_dir_nets, "Supplementary_Figure_6.png")
+png(out_supp6, width = 3400, height = 2400, res = 300)
+
+layout(matrix(c(1,2), nrow=1), widths=c(3.9, 0.9))
+par(mar=c(0, 0, 0, 0), bg="white")
+set.seed(123)
+
+plot(g_cross_final_plot, 
+     layout=layout_with_fr(g_cross_final_plot, weights=abs(E(g_cross_final_plot)$weight)), 
+     vertex.color=ifelse(V(g_cross_final_plot)$tissue == "NPA", "#2980b9E6", "#27ae60E6"), 
+     vertex.size=6.5, 
+     vertex.frame.color="#1a252f", 
+     vertex.frame.width=0.9,
+     vertex.label=V(g_cross_final_plot)$label, 
+     vertex.label.cex=0.85,          
+     vertex.label.font=2, 
+     vertex.label.color="#2c3e50",
+     rescale=TRUE, xlim=c(-1.0, 1.0), ylim=c(-1.0, 1.0))
+
+par(mar=c(1, 0, 1, 1))
+plot.new()
+legend(x = "center", y = 0.85, legend=c("Nasopharynx", "Gut"), 
+       col=c("#2980b9", "#27ae60"), pch=19, bty="n", title="Niche Source", cex=1.1, title.font=2, y.intersp=1.3)
+legend(x = "bottom", y = 0.15, legend=c("Coupling (+)", "Inhibition (-)"), 
+       col=c("#2ecc71", "#e74c3c"), lty=1, lwd=6, bty="n", title="Cross-Talk", cex=1.1, title.font=2, y.intersp=1.3)
+
+dev.off()
+cat("  >> [Éxito] Supplementary_Figure_6 guardada correctamente.\n")
