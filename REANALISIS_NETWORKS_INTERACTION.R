@@ -1,5 +1,5 @@
 # ==============================================================================
-# SCRIPT REFINADO v8: FLUJO DE TRABAJO REESTRUCTURADO Y OPTIMIZADO
+# SCRIPT REFINADO v9: AMPLIADO CON MULTIPLES METRICAS Y PROPORCIONES PREMIUM
 # ==============================================================================
 suppressPackageStartupMessages({
   library(phyloseq)
@@ -113,29 +113,49 @@ sample_data(pseq_rare_genus) <- sample_data(metadata_df)
 
 
 # ==============================================================================
-# 2. CÁLCULO DE DIVERSIDAD ALFA Y BETA (ENFOQUE DE MÁXIMO RIGOR ESTADÍSTICO)
+# 2. CÁLCULO DE DIVERSIDAD ALFA Y BETA
 # ==============================================================================
 cat("\n[2] Procesando Diversidades con Modelos de Efectos Mixtos y PERMANOVA Pareado...\n")
 
-# --- 2.1 ALFA DIVERSIDAD: Modelo Lineal Mixto (LME) ---
-alpha_metrics <- estimate_richness(pseq_rare_genus, measures = "Shannon")
-df_alpha <- merge(data.frame(Sample_ID = rownames(alpha_metrics), Shannon = alpha_metrics$Shannon),
+# --- 2.1 ALFA DIVERSIDAD: Modelo Lineal Mixto (LME) para múltiples métricas ---
+alpha_metrics <- estimate_richness(pseq_rare_genus, measures = c("Observed", "Shannon", "Simpson"))
+df_alpha <- merge(data.frame(Sample_ID = rownames(alpha_metrics), 
+                             Observed = alpha_metrics$Observed,
+                             Shannon = alpha_metrics$Shannon, 
+                             Simpson = alpha_metrics$Simpson),
                   metadata_df, by = "Sample_ID")
 
-# El modelo ideal: Ajuste simultáneo por Edad y Tipo de muestra con intercepto aleatorio por Paciente
-lme_alpha <- lme(Shannon ~ Sample_Type + Age, random = ~1|Patient_ID, data = df_alpha, method = "REML")
+# Inicializar dataframe para almacenar significancias de los corchetes
+signif_list <- list()
 
-# Extracción de estadísticos para la tabla y la corrección gráfica
-summary_lme <- summary(lme_alpha)$tTable
-beta_age  <- summary_lme["Age", "Value"]
-
-# Guardar tabla de Alfa Diversidad (LME)
-write.csv(summary_lme, 
-          file = paste0(output_dir_stats, "LME_Alpha_Diversity_Model.csv"), 
-          row.names = TRUE)
-
-# Guardar la variable corregida por edad basada en el coeficiente del modelo mixto
-df_alpha$Shannon_Corrected <- df_alpha$Shannon - (beta_age * df_alpha$Age)
+for (metric in c("Observed", "Shannon", "Simpson")) {
+  # Ajuste del modelo mixto para cada métrica
+  lme_form <- as.formula(paste(metric, "~ Sample_Type + Age"))
+  lme_alpha <- lme(lme_form, random = ~1|Patient_ID, data = df_alpha, method = "REML")
+  
+  summary_lme <- summary(lme_alpha)$tTable
+  beta_age  <- summary_lme["Age", "Value"]
+  
+  # Guardar tabla de resultados
+  write.csv(summary_lme, 
+            file = paste0(output_dir_stats, "LME_Alpha_Diversity_", metric, "_Model.csv"), 
+            row.names = TRUE)
+  
+  # Corrección por edad
+  df_alpha[[paste0(metric, "_Corrected")]] <- df_alpha[[metric]] - (beta_age * df_alpha$Age)
+  
+  # Extraer p-valor corregido para el contraste post-hoc entre NPA y GUT
+  emm <- emmeans(lme_alpha, specs = pairwise ~ Sample_Type, adjust = "fdr")
+  p_val <- as.data.frame(emm$contrasts)$p.value
+  
+  # Convertir a formato asterisco
+  annot_star <- "ns"
+  if(p_val < 0.05)  annot_star <- "*"
+  if(p_val < 0.01)  annot_star <- "**"
+  if(p_val < 0.001) annot_star <- "***"
+  
+  signif_list[[metric]] <- data.frame(p = p_val, annot = annot_star)
+}
 
 
 # --- 2.2 BETA DIVERSIDAD: PERMANOVA Secuencial Pareado y Dispersión ---
@@ -143,71 +163,104 @@ bray_dist <- phyloseq::distance(pseq_rare_genus, method = "bray")
 ord_pcoa  <- ordinate(pseq_rare_genus, method="PCoA", distance="bray")
 df_pcoa   <- plot_ordination(pseq_rare_genus, ord_pcoa, justDF = TRUE)
 
-# Estructura de permutación pareada: Restringe los cambios ÚNICAMENTE dentro del mismo paciente
+# Estructura de permutación pareada
 perm_structure <- how(blocks = metadata_df$Patient_ID, nperm = 999)
 
-# PERMANOVA: Ajusta primero por edad (secuencial), controlando el diseño pareado
+# PERMANOVA
 permanova_res <- adonis2(bray_dist ~ Age + Sample_Type, 
                          data = metadata_df, 
                          permutations = perm_structure,
-                         by = "terms") # Evalúa en orden: Age primero, luego Sample_Type
+                         by = "terms")
 
-# Guardar tabla de PERMANOVA
 write.csv(as.data.frame(permanova_res), 
           file = paste0(output_dir_stats, "PERMANOVA_Beta_Diversity_Pareado.csv"), 
           row.names = TRUE)
 
-# Homogeneidad de la dispersión de grupos (Betadisper)
+# Homogeneidad de la dispersión de grupos
 dispersion_res <- betadisper(bray_dist, group = metadata_df$Sample_Type)
 permtest_disp  <- permutest(dispersion_res, permutations = perm_structure)
 
-# Guardar tabla de Dispersión
 write.csv(as.data.frame(permtest_disp$tab), 
           file = paste0(output_dir_stats, "Betadisper_Homogeneity_Test.csv"), 
           row.names = TRUE)
 
 
-# --- 2.3 GRÁFICOS PARA PUBLICACIÓN (Limpios, sin títulos estadísticos) ---
+# ==============================================================================
+# 3. GENERACIÓN DE GRÁFICOS INDEPENDIENTES PARA PANEL PREMIUM
+# ==============================================================================
 
-p_alpha_box <- ggplot(df_alpha, aes(x = Sample_Type, y = Shannon_Corrected, fill = Sample_Type)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.85, width = 0.5) +
-  geom_jitter(width = 0.1, alpha = 0.4, size = 1.5, color = "#2c3e50") +
-  scale_fill_manual(values = niche_colors) +
-  theme_bw(base_size = 12) +
-  labs(x = "Niche / Sample Type", 
-       y = "Shannon Index (Age-Corrected)") +
-  theme(axis.title = element_text(face = "bold", size = 11),
-        axis.text = element_text(color = "black", size = 10),
-        axis.text.x = element_text(face = "bold"),
-        legend.position = "none",
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())
+# Función para automatizar los boxplots individuales de Alpha
+make_alpha_plot <- function(df, y_col, label_y, signif_df) {
+  p <- ggplot(df, aes_string(x = "Sample_Type", y = y_col, fill = "Sample_Type")) +
+    geom_boxplot(outlier.shape = NA, alpha = 0.85, width = 0.5, color = "#2c3e50") +
+    geom_jitter(width = 0.1, alpha = 0.4, size = 1.5, color = "#2c3e50") +
+    scale_fill_manual(values = niche_colors) +
+    theme_bw(base_size = 11) +
+    labs(x = NULL, y = label_y) +
+    theme(axis.title.y = element_text(face = "bold", size = 10),
+          axis.text = element_text(color = "black", size = 9),
+          axis.text.x = element_text(face = "bold"),
+          legend.position = "none",
+          panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(color = "#f0f0f0"))
+  
+  # Si el contraste es significativo, añadir corchete manual seguro
+  if (signif_df$annot != "ns") {
+    max_y <- max(df[[y_col]], na.rm = TRUE)
+    range_y <- max_y - min(df[[y_col]], na.rm = TRUE)
+    p <- p + geom_signif(
+      comparisons = list(c("NPA", "GUT")),
+      annotations = signif_df$annot,
+      y_position = max_y + (range_y * 0.05),
+      tip_length = 0.02,
+      vjust = 0.5,
+      textsize = 4,
+      color = "black"
+    )
+  }
+  return(p)
+}
 
+# Crear las 3 gráficas individuales de Alpha
+p_observed <- make_alpha_plot(df_alpha, "Observed_Corrected", "Observed Richness\n(Age-Corrected)", signif_list[["Observed"]])
+p_shannon  <- make_alpha_plot(df_alpha, "Shannon_Corrected", "Shannon Index\n(Age-Corrected)", signif_list[["Shannon"]])
+p_simpson  <- make_alpha_plot(df_alpha, "Simpson_Corrected", "Simpson Index\n(Age-Corrected)", signif_list[["Simpson"]])
+
+# --- Gráfico de Beta Diversidad (Ocupará todo el ancho abajo) ---
 p_beta_pcoa <- ggplot(df_pcoa, aes(x = Axis.1, y = Axis.2, color = Sample_Type)) +
   geom_point(size = 2.5, alpha = 0.8) +
   stat_ellipse(aes(fill = Sample_Type), geom = "polygon", alpha = 0.1, type = "t", linetype = 2) +
   scale_color_manual(values = niche_colors, name = "Niche Location") +
   scale_fill_manual(values = niche_colors, name = "Niche Location") +
-  theme_bw(base_size = 12) +
+  theme_bw(base_size = 11) +
   labs(x = paste0("PCoA 1 (", round(ord_pcoa$values$Relative_eig[1] * 100, 1), "%)"),
        y = paste0("PCoA 2 (", round(ord_pcoa$values$Relative_eig[2] * 100, 1), "%)")) +
-  theme(axis.title = element_text(face = "bold", size = 11),
-        axis.text = element_text(color = "black", size = 10),
+  theme(axis.title = element_text(face = "bold", size = 10),
+        axis.text = element_text(color = "black", size = 9),
         legend.title = element_text(face = "bold", size = 10),
         legend.text = element_text(size = 9),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = "#f0f0f0"),
+        legend.position = "right")
 
+# ==============================================================================
+# 4. ENSAMBLADO FINAL CON PATCHWORK (ESTRUCTURA 3 ARRIBA, 1 ABAJO)
+# ==============================================================================
+# Empaquetamos los tres de arriba en una sola fila
+top_row <- p_observed + p_shannon + p_simpson + plot_layout(ncol = 3)
 
-# --- 2.4 Ensamblado Final con Patchwork y Guardado (300 DPI) ---
-panel_joint <- p_alpha_box + p_beta_pcoa + 
-  plot_layout(ncol = 2, widths = c(1, 1.2)) + 
+# Ensamblado final vertical: fila superior (alpha) / fila inferior (beta)
+# Cambiamos las proporciones para que el PCoA tenga un poco más de aire (0.7 a 1)
+panel_joint <- top_row / p_beta_pcoa + 
+  plot_layout(heights = c(0.7, 1)) + 
   plot_annotation(tag_levels = 'a') & 
-  theme(plot.tag = element_text(face = "bold", size = 14))
+  theme(plot.tag = element_text(face = "bold", size = 14, color = "#2c3e50"))
 
-ggsave(paste0(output_dir_global, "Plot_Diversity_Simplified_Panel.png"), 
-       plot = panel_joint, width = 10, height = 4.5, dpi = 300)
+# Guardar con dimensiones optimizadas para evitar solapamientos verticales
+ggsave(paste0(output_dir_global, "Figure_Supplementary_1_Diversity_Expanded_Panel.png"), 
+       plot = panel_joint, width = 11, height = 8.5, dpi = 300)
 
+cat(" >> ¡Análisis de diversidad expandido y panel guardado exitosamente!\n")
 # ==============================================================================
 # 3. REDES DE CADA NICHO (INTRA-NICHO CO-ABUNDANCIA)
 # ==============================================================================
