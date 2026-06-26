@@ -261,10 +261,11 @@ ggsave(paste0(output_dir_global, "Figure_Supplementary_1_Diversity_Expanded_Pane
        plot = panel_joint, width = 11, height = 8.5, dpi = 300)
 
 cat(" >> ¡Análisis de diversidad expandido y panel guardado exitosamente!\n")
+
 # ==============================================================================
-# 3. REDES DE CADA NICHO (INTRA-NICHO CO-ABUNDANCIA)
+# 3. REDES DE CADA NICHO (INTRA-NICHO CO-ABUNDANCIA OPTIMIZADA)
 # ==============================================================================
-cat("\n[3] Módulo 3: Construcción de Redes Intra-Nicho por separado (Generación SpiecEasi)...\n")
+cat("\n[3] Módulo 3: Construcción de Redes Intra-Nicho por separado (Generación SpiecEasi NATIVA)...\n")
 
 prevalence_threshold <- 0.10
 pseq_filt <- filter_taxa(pseq_rare_genus,
@@ -287,7 +288,6 @@ extract_otu_safe <- function(ps) {
   mat <- otu_table(ps)
   if (taxa_are_rows(ps)) mat <- t(mat)
   otu_standard <- as.matrix(mat)
-  # Forzamos que las filas queden identificadas directamente por Patient_ID para emparejamiento seguro
   rownames(otu_standard) <- as.character(sample_data(ps)$Patient_ID)
   return(otu_standard)
 }
@@ -297,50 +297,33 @@ otu_gut <- extract_otu_safe(pseq_gut)
 
 arrange_rows_by_name <- function(mat) mat[order(rownames(mat)), , drop=FALSE]
 
-# Aseguramos alineación perfecta de pacientes entre matrices intra-nicho antes de modelar
 common_patients_internal <- intersect(rownames(otu_npa), rownames(otu_gut))
-otu_npa <- otu_npa[common_patients_internal, , drop=FALSE] %>% arrange_rows_by_name() # orden alfabético estable
+otu_npa <- otu_npa[common_patients_internal, , drop=FALSE] %>% arrange_rows_by_name()
 otu_gut <- otu_gut[common_patients_internal, , drop=FALSE] %>% arrange_rows_by_name()
 
-otu_npa <- arrange_rows_by_name(otu_npa)
-otu_gut <- arrange_rows_by_name(otu_gut)
-
 run_spiec <- function(otu_mat, label) {
-  cat(sprintf("  >> SpiecEasi [%s]...\n", label))
+  cat(sprintf("  >> SpiecEasi [%s] con estimación Sparser MB...\n", label))
   spiec.easi(otu_mat, method="mb", lambda.min.ratio=1e-2, nlambda=20, pulsar.params=list(rep.num=50, ncores=1))
 }
 se_npa <- run_spiec(otu_npa, "NPA")
 se_gut <- run_spiec(otu_gut, "GUT")
 
-extract_igraph <- function(se_obj, otu_mat, label) {
-  beta_raw <- getOptBeta(se_obj)
-  if (is.null(beta_raw) || length(beta_raw)==0) {
-    p <- ncol(otu_mat)
-    beta_sym <- matrix(0, p, p, dimnames=list(colnames(otu_mat), colnames(otu_mat)))
-  } else {
-    beta_sym <- as.matrix(symBeta(beta_raw, mode="maxabs"))
-    p <- ncol(otu_mat)
-    if (nrow(beta_sym) != p || ncol(beta_sym) != p) {
-      beta_new <- matrix(0, p, p, dimnames=list(colnames(otu_mat), colnames(otu_mat)))
-      if (!is.null(colnames(beta_sym)) && all(colnames(beta_sym) %in% colnames(otu_mat))) {
-        idx <- match(colnames(beta_sym), colnames(otu_mat))
-        beta_new[idx, idx] <- beta_sym
-      } else {
-        m <- min(p, nrow(beta_sym))
-        beta_new[1:m,1:m] <- beta_sym[1:m,1:m]
-      }
-      beta_sym <- beta_new
-    }
-    diag(beta_sym) <- 0
-    rownames(beta_sym) <- colnames(beta_sym) <- colnames(otu_mat)
-  }
+extract_igraph_robust <- function(se_obj, otu_mat) {
+  refit_mat <- as.matrix(getRefit(se_obj))
+  beta_raw  <- getOptBeta(se_obj)
+  beta_sym  <- as.matrix(symBeta(beta_raw, mode="maxabs"))
+  
+  colnames(refit_mat) <- rownames(refit_mat) <- colnames(otu_mat)
+  colnames(beta_sym)  <- rownames(beta_sym)  <- colnames(otu_mat)
+  
   g <- graph_from_adjacency_matrix(beta_sym, mode="undirected", weighted=TRUE, diag=FALSE)
-  V(g)$name <- colnames(otu_mat)
+  V(g)$name  <- colnames(otu_mat)
   V(g)$label <- colnames(otu_mat)
   return(g)
 }
-g_npa <- extract_igraph(se_npa, otu_npa, "NPA")
-g_gut <- extract_igraph(se_gut, otu_gut, "GUT")
+
+g_npa <- extract_igraph_robust(se_npa, otu_npa)
+g_gut <- extract_igraph_robust(se_gut, otu_gut)
 
 detect_communities <- function(g, label) {
   g_sub <- delete_vertices(g, degree(g)==0)
@@ -352,7 +335,7 @@ detect_communities <- function(g, label) {
   mod_map <- setNames(membership(comm), V(g_sub)$name)
   V(g)$module <- mod_map[V(g)$name]
   V(g)$module[is.na(V(g)$module)] <- 0
-  cat(sprintf("  >> [%s] %d módulos detectados por Louvain.\n", label, max(comm$membership, na.rm=TRUE)))
+  cat(sprintf("  >> [%s] %d módulos funcionales detectados por el algoritmo de Louvain.\n", label, max(comm$membership, na.rm=TRUE)))
   return(list(graph=g, communities=comm))
 }
 res_npa <- detect_communities(g_npa, "NPA"); g_npa <- res_npa$graph
@@ -376,9 +359,9 @@ write.csv(hub_table, paste0(output_dir_nets, "Hub_Genera_NPA_GUT.csv"), row.name
 
 
 # ------------------------------------------------------------------------------
-# 3.1 EXTRACCIÓN DE MÓDULOS Y EXTRACCIÓN DE EIGENVECTORS POR MÓDULO (EIGEN-SCORES)
+# 3.1 EXTRACCIÓN DE MÓDULOS Y EXTRACCIÓN DE EIGENVECTORS (CON Z-SCORE IMPERATIVO)
 # ------------------------------------------------------------------------------
-cat("\n[3.1] Calculando Eigen-Scores ponderados por la topología interna del módulo...\n")
+cat("\n[3.1] Calculando Eigen-Scores ponderados y escalando a Z-scores estándar...\n")
 df_analysis <- data.frame(Patient_ID = rownames(otu_npa), stringsAsFactors = FALSE)
 
 otu_npa_log <- log1p(otu_npa)
@@ -387,7 +370,7 @@ otu_gut_log <- log1p(otu_gut)
 adj_npa_full <- as.matrix(as_adjacency_matrix(g_npa, attr="weight", sparse=FALSE))
 adj_gut_full <- as.matrix(as_adjacency_matrix(g_gut, attr="weight", sparse=FALSE))
 
-# --- Cómputo Eigen-Scores para Nasofaringe (NPA) ---
+# --- Nasofaringe (NPA) ---
 npa_modules <- sort(unique(V(g_npa)$module)); npa_modules <- npa_modules[npa_modules != 0]
 for(m in npa_modules) {
   genera_in_mod <- V(g_npa)$name[V(g_npa)$module == m]
@@ -401,13 +384,13 @@ for(m in npa_modules) {
     hub_mod <- genera_in_mod[which.max(degree(g_npa, v=genera_in_mod))]
     if(ev[hub_mod] < 0) ev <- ev * -1
     
-    df_analysis[[paste0("NPA_Mod", m)]] <- as.matrix(otu_npa_log[, genera_in_mod]) %*% ev
+    df_analysis[[paste0("NPA_Mod", m)]] <- as.vector(scale(as.matrix(otu_npa_log[, genera_in_mod]) %*% ev))
   } else if (length(genera_in_mod) == 1) {
-    df_analysis[[paste0("NPA_Mod", m)]] <- otu_npa_log[, genera_in_mod]
+    df_analysis[[paste0("NPA_Mod", m)]] <- as.vector(scale(otu_npa_log[, genera_in_mod]))
   }
 }
 
-# --- Cómputo Eigen-Scores para Intestino (GUT) ---
+# --- Intestino (GUT) ---
 gut_modules <- sort(unique(V(g_gut)$module)); gut_modules <- gut_modules[gut_modules != 0]
 for(m in gut_modules) {
   genera_in_mod = V(g_gut)$name[V(g_gut)$module == m]
@@ -421,29 +404,25 @@ for(m in gut_modules) {
     hub_mod <- genera_in_mod[which.max(degree(g_gut, v=genera_in_mod))]
     if(ev[hub_mod] < 0) ev <- ev * -1
     
-    df_analysis[[paste0("GUT_Mod", m)]] <- as.matrix(otu_gut_log[, genera_in_mod]) %*% ev
+    df_analysis[[paste0("GUT_Mod", m)]] <- as.vector(scale(as.matrix(otu_gut_log[, genera_in_mod]) %*% ev))
   } else if (length(genera_in_mod) == 1) {
-    df_analysis[[paste0("GUT_Mod", m)]] <- otu_gut_log[, genera_in_mod]
+    df_analysis[[paste0("GUT_Mod", m)]] <- as.vector(scale(otu_gut_log[, genera_in_mod]))
   }
 }
 
 
 # ------------------------------------------------------------------------------
-# 3.2 TRADUCCIÓN CLÍNICA, MODELADO DE REGRESIÓN MÚLTIPLE Y HEATMAP DE CORRIDO
+# 3.2 TRADUCCIÓN CLÍNICA Y MODELADO DE REGRESIÓN MÚLTIPLE (BETAS COMPARABLES)
 # ------------------------------------------------------------------------------
 cat("\n[3.2] Desacoplando variables clínicas y ajustando Modelos de Regresión Múltiple...\n")
 
 raw_metadata <- data.frame(as(sample_data(pseq_rare_genus), "data.frame"), stringsAsFactors = FALSE, check.names = FALSE)
 
-# Extracción limpia y robusta de los componentes individuales de fenotipo y co-variables
 metadata_cleaned <- raw_metadata %>%
   mutate(
-    # Las 3 variables principales solicitadas (Binarias fijas a niveles No/Yes para estabilizar coeficientes)
     `Bronchiolitis`        = factor(ifelse(grepl("^Yes$|1", Bronchiolitis, ignore.case=TRUE), "Yes", "No"), levels=c("No", "Yes")),
     `RSV Infection`        = factor(ifelse(grepl("^Yes$|1|RSV\\+", Respiratory.syncytial.virus) | grepl("RSV\\+", Condicion_Clinica), "Yes", "No"), levels=c("No", "Yes")),
     `Wheezing`             = factor(ifelse(grepl("Wheeze\\+", Condicion_Clinica) | grepl("^Yes$|1", Wheezing.treatment, ignore.case=TRUE) | (suppressWarnings(as.numeric(Wheezing.count)) > 0), "Yes", "No"), levels=c("No", "Yes")),
-    
-    # Resto de co-variables fenotípicas de contexto
     `Cesarean Delivery`    = factor(ifelse(grepl("^Yes$|1", Cesarean.section, ignore.case=TRUE), "Yes", "No"), levels=c("No", "Yes")),
     `Previous Antibiotics` = factor(ifelse(grepl("^Yes$|1", Previous.antibiotics, ignore.case=TRUE), "Yes", "No"), levels=c("No", "Yes")),
     `Family History Atopy` = factor(ifelse(grepl("^Yes$|1", Family.history.atopy, ignore.case=TRUE), "Yes", "No"), levels=c("No", "Yes")),
@@ -454,14 +433,11 @@ metadata_cleaned <- raw_metadata %>%
   distinct(Patient_ID, .keep_all = TRUE)
 
 df_analysis_clean_base <- df_analysis %>% select(Patient_ID, starts_with("NPA_Mod"), starts_with("GUT_Mod"))
-
-# CORRECCIÓN: Forzamos de forma explícita el uso de dplyr para evitar conflictos con 'mia'
 df_analysis_extended   <- dplyr::inner_join(df_analysis_clean_base, metadata_cleaned, by="Patient_ID")
 
-target_modules <- c(grep("^NPA_Mod", colnames(df_analysis_extended), value=TRUE), grep("^GUT_Mod", colnames(df_analysis_extended), value=TRUE))
+target_modules  <- c(grep("^NPA_Mod", colnames(df_analysis_extended), value=TRUE), grep("^GUT_Mod", colnames(df_analysis_extended), value=TRUE))
 predictors_list <- c("Bronchiolitis", "RSV Infection", "Wheezing", "Age (Months)", "Breastfeeding", "Cesarean Delivery", "Previous Antibiotics", "Family History Atopy")
 
-# Escalamos la variable de edad para que su coeficiente beta sea directamente interpretable y comparable frente a los binarios
 df_modelling <- df_analysis_extended
 df_modelling$`Age (Months)` <- as.vector(scale(df_modelling$`Age (Months)`))
 
@@ -469,14 +445,12 @@ regression_results <- data.frame()
 
 if(length(target_modules) > 0) {
   for(mod in target_modules) {
-    # Ajustamos un único modelo lineal múltiple por módulo con todos los predictores controlados mutuamente
     formula_mod <- as.formula(paste0("`", mod, "` ~ Bronchiolitis + `RSV Infection` + Wheezing + `Age (Months)` + Breastfeeding + `Cesarean Delivery` + `Previous Antibiotics` + `Family History Atopy`"))
     fit <- tryCatch(lm(formula_mod, data=df_modelling), error = function(e) NULL)
     
     if(!is.null(fit)) {
       coef_matrix <- summary(fit)$coefficients
       for(pred in predictors_list) {
-        # Añadimos fixed = TRUE para que los paréntesis de la Edad se lean como texto literal
         matched_row <- rownames(coef_matrix)[grepl(pred, rownames(coef_matrix), fixed = TRUE)]
         if(length(matched_row) > 0) {
           eff_size <- coef_matrix[matched_row[1], "Estimate"]
@@ -489,11 +463,9 @@ if(length(target_modules) > 0) {
       }
     }
   }
-  # Corrección global de FDR (Benjamini-Hochberg) cruzando todos los coeficientes calculados
   regression_results <- regression_results %>% mutate(FDR_Value = p.adjust(P_Value, method = "fdr"))
 }
 
-# Generación automática de etiquetas premium (Valor de Beta + Estrellas de significación FDR)
 regression_results <- regression_results %>%
   mutate(
     Significance_Label = case_when(
@@ -503,32 +475,25 @@ regression_results <- regression_results %>%
       TRUE ~ ""
     ),
     Cell_Text = sprintf("%.2f%s", Effect_Size, Significance_Label),
-    Predictor = factor(Predictor, levels = predictors_list) # Fijamos orden estricto de columnas
+    Predictor = factor(Predictor, levels = predictors_list)
   )
 
-# --- REPRESENTACIÓN GRÁFICA: HEATMAP CONTINUO "DE CORRIDO" ---
 plot_heatmap_expanded <- ggplot(regression_results, aes(x = Predictor, y = Module, fill = Effect_Size)) +
   geom_tile(color = "white", lwd = 0.5) +
   geom_text(aes(label = Cell_Text), color = "black", size = 2.8, fontface = "bold") +
-  scale_fill_gradient2(low = "#2c3e50", mid = "#f1c40f", high = "#e74c3c", midpoint = 0, 
-                       name = "Standardized\nEffect Size (β)") +
+  scale_fill_gradient2(low = "#2c3e50", mid = "#f1c40f", high = "#e74c3c", midpoint = 0, name = "Standardized\nEffect Size (β)") +
   theme_minimal(base_size = 11) +
-  labs(title = "Standardized Effect Sizes (β) Across Clinical Traits",
-             x = "Patient Clinical Traits & Contextual Covariates", 
-       y = "Structural Network Discovery Modules") +
-  theme(axis.text.x = element_text(angle = 35, hjust = 1, face = "bold", color = "#2c3e50"),
-        axis.text.y = element_text(face = "bold", color = "#2c3e50"),
-        panel.grid = element_blank(),
-        plot.title = element_text(face = "bold", size = 11),
-        legend.title = element_text(face = "bold", size = 9))
+  labs(title = "Standardized Effect Sizes (β) Across Clinical Traits", x = "Patient Clinical Traits & Contextual Covariates", y = "Structural Network Discovery Modules") +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1, face = "bold", color = "#2c3e50"), axis.text.y = element_text(face = "bold", color = "#2c3e50"), panel.grid = element_blank())
 
 ggsave(paste0(output_dir_nets, "Plot_Heatmap_Expanded_Clinical_Covariates.png"), plot = plot_heatmap_expanded, width = 11, height = 7, dpi = 300)
 
 
-# --- EXPORTAR LA TABLA MAESTRA DE ASOCIACIÓN POR BACTERIA EN FORMATO WIDE (UNA FILA POR MÓDULO) ---
+# ==============================================================================
+# RETORNADO: COMPILACIÓN DE LA TABLA MAESTRA EN FORMATO WIDE
+# ==============================================================================
 cat("  >> Compilando tabla maestra de coeficientes resumida por Módulo...\n")
 
-# 1. Extraemos los grados (degree) de todas las bacterias para identificar el Hub de cada módulo
 deg_npa <- data.frame(Genus = V(g_npa)$name, Niche = "Nasopharynx (NPA)", Degree = degree(g_npa), stringsAsFactors = FALSE)
 deg_gut <- data.frame(Genus = V(g_gut)$name, Niche = "Gut (GUT)", Degree = degree(g_gut), stringsAsFactors = FALSE)
 deg_master <- rbind(deg_npa, deg_gut)
@@ -536,12 +501,10 @@ deg_master <- rbind(deg_npa, deg_gut)
 taxa_npa_status <- data.frame(Genus = V(g_npa)$name, Niche = "Nasopharynx (NPA)", Structural_Module = V(g_npa)$module, stringsAsFactors = FALSE)
 taxa_gut_status <- data.frame(Genus = V(g_gut)$name, Niche = "Gut (GUT)", Structural_Module = V(g_gut)$module, stringsAsFactors = FALSE)
 
-# 2. Combinamos la taxonomía base, eliminamos el módulo de ruido (0) y cruzamos con sus grados
 master_taxa_raw <- rbind(taxa_npa_status, taxa_gut_status) %>% 
   filter(Structural_Module != 0) %>%
   dplyr::left_join(deg_master, by = c("Genus", "Niche"))
 
-# 3. Colapsamos la taxonomía: una sola línea por módulo con sus géneros unidos por espacios y su Hub
 master_modules_collapsed <- master_taxa_raw %>%
   group_by(Niche, Structural_Module) %>%
   summarise(
@@ -550,7 +513,6 @@ master_modules_collapsed <- master_taxa_raw %>%
     .groups = "drop"
   )
 
-# 4. Si existen resultados de las regresiones, pivotamos y fusionamos todo
 if(exists("regression_results") && nrow(regression_results) > 0) {
   clinical_p_wide <- regression_results %>%
     mutate(String_Report = sprintf("%.3f (FDR: %.4f)", Effect_Size, FDR_Value)) %>%
@@ -560,160 +522,68 @@ if(exists("regression_results") && nrow(regression_results) > 0) {
            Niche_Prefix = ifelse(grepl("^NPA", Module), "Nasopharynx (NPA)", "Gut (GUT)")) %>%
     pivot_wider(id_cols = c(Module_Num, Niche_Prefix), names_from = Predictor, values_from = String_Report, names_prefix = "Beta_")
   
-  # Combinamos las betas clínicas con nuestra estructura de módulos colapsados
   master_clinical_report <- master_modules_collapsed %>%
     dplyr::left_join(clinical_p_wide, by = c("Structural_Module" = "Module_Num", "Niche" = "Niche_Prefix")) %>%
     mutate(Structural_Module = paste0(ifelse(Niche == "Nasopharynx (NPA)", "NPA_Mod", "GUT_Mod"), Structural_Module)) %>%
     arrange(desc(Niche), Structural_Module)
   
-  # 5. Reorganizamos los elementos para que los géneros y el Hub queden al final de todo de forma estricta
   master_clinical_report <- master_clinical_report %>%
     relocate(Genera_In_Module, .after = last_col()) %>%
     relocate(Hub_Genus, .after = last_col())
   
-  # Guardamos el archivo final refinado
   write.csv(master_clinical_report, paste0(output_dir_nets, "Master_Taxa_Module_Clinical_Associations_FINAL.csv"), row.names = FALSE)
-  cat("  >> ¡Tabla maestra optimizada guardada con éxito! (1 fila por módulo, géneros agrupados y columna Hub al final).\n")
+  cat("  >> ¡Tabla maestra de asociación por bacteria exportada con éxito!\n")
 }
 
 
 # ------------------------------------------------------------------------------
-# 3.3 PLOTS DE GRAFOS INDEPENDIENTES DE CADA NICHO (NPA Y GUT, SIN MÓDULO 0)
+# 3.4 COMPARACIÓN TOPOLÓGICA DE REDES Y RIGOR MATEMÁTICO (REVISOR 2)
 # ------------------------------------------------------------------------------
-cat("\n[3.3] Generando visualizaciones premium de Redes Intra-Nicho Disecadas (Sin Módulo 0)...\n")
+cat("\n[3.4] Computando métricas estructurales globales para Tabla Comparativa de Redes...\n")
 
-log_mean_npa <- log1p(colMeans(otu_npa, na.rm = TRUE))
-log_mean_gut <- log1p(colMeans(otu_gut, na.rm = TRUE))
-
-# --- PLOT INDEPENDIENTE: NASOFARINGE (NPA) ---
-g_npa_clean <- delete_vertices(g_npa, V(g_npa)[V(g_npa)$module == 0])
-V(g_npa_clean)$label <- V(g_npa_clean)$name
-E(g_npa_clean)$color <- ifelse(E(g_npa_clean)$weight > 0, "#2ecc71DD", "#e74c3cDD")
-E(g_npa_clean)$width <- abs(E(g_npa_clean)$weight) * 5.5
-V(g_npa_clean)$size <- 3 + (log_mean_npa[V(g_npa_clean)$name] * 1.2)
-
-unique_npa_mods <- sort(unique(V(g_npa_clean)$module))
-color_map_npa <- setNames(paste0(colorRampPalette(brewer.pal(8, "Set1"))(length(unique_npa_mods)), "CC"), unique_npa_mods)
-V(g_npa_clean)$color_node <- color_map_npa[as.character(V(g_npa_clean)$module)]
-
-out_npa_dissected <- paste0(output_dir_nets, "Network_Dissected_Internal_NPA_NoMod0.png")
-png(out_npa_dissected, width=3200, height=2800, res=300)
-layout(matrix(c(1,2), nrow=1), widths=c(3,1))
-par(mar=c(2, 2, 5, 2), bg="white")
-set.seed(42)
-plot(g_npa_clean, layout=layout_with_fr(g_npa_clean, weights=abs(E(g_npa_clean)$weight)), 
-     vertex.color=V(g_npa_clean)$color_node, vertex.size=V(g_npa_clean)$size, vertex.frame.color="#2c3e50", vertex.frame.width=0.7,
-     vertex.label=V(g_npa_clean)$label, vertex.label.cex=0.50, vertex.label.font=4, vertex.label.color="#2c3e50",
-     main="Nasopharynx (NPA) Connected Network (Excluding Mod0)")
-par(mar=c(2, 0, 5, 1)); plot.new()
-legend("topleft", legend=paste("NPA Mod", names(color_map_npa)), col=color_map_npa, pch=19, bty="n", title="Modules", cex=1.0, title.font=2)
-legend("center", legend=c("Positive Alignment (+)", "Mutual Exclusion (-)"), col=c("#2ecc71", "#e74c3c"), lty=1, lwd=4, bty="n", title="Interaction Type", cex=1.0, title.font=2)
-dev.off()
-
-# --- PLOT INDEPENDIENTE: INTESTINO (GUT) ---
-g_gut_clean <- delete_vertices(g_gut, V(g_gut)[V(g_gut)$module == 0])
-V(g_gut_clean)$label <- V(g_gut_clean)$name
-E(g_gut_clean)$color <- ifelse(E(g_gut_clean)$weight > 0, "#2ecc71DD", "#e74c3cDD")
-E(g_gut_clean)$width <- abs(E(g_gut_clean)$weight) * 5.5
-V(g_gut_clean)$size <- 3 + (log_mean_gut[V(g_gut_clean)$name] * 1.2)
-
-unique_gut_mods <- sort(unique(V(g_gut_clean)$module))
-color_map_gut <- setNames(paste0(colorRampPalette(brewer.pal(8, "Dark2"))(length(unique_gut_mods)), "CC"), unique_gut_mods)
-V(g_gut_clean)$color_node <- color_map_gut[as.character(V(g_gut_clean)$module)]
-
-out_gut_dissected <- paste0(output_dir_nets, "Network_Dissected_Internal_GUT_NoMod0.png")
-png(out_gut_dissected, width=3200, height=2800, res=300)
-layout(matrix(c(1,2), nrow=1), widths=c(3,1))
-par(mar=c(2, 2, 5, 2), bg="white")
-set.seed(88)
-plot(g_gut_clean, layout=layout_with_fr(g_gut_clean, weights=abs(E(g_gut_clean)$weight)),
-     vertex.color=V(g_gut_clean)$color_node, vertex.size=V(g_gut_clean)$size, vertex.frame.color="#2c3e50", vertex.frame.width=0.7,
-     vertex.label=V(g_gut_clean)$label, vertex.label.cex=0.50, vertex.label.font=4, vertex.label.color="#2c3e50",
-     main="Gut (GUT) Connected Network (Excluding Mod0)")
-par(mar=c(2, 0, 5, 1)); plot.new()
-legend("topleft", legend=paste("GUT Mod", names(color_map_gut)), col=color_map_gut, pch=19, bty="n", title="Modules", cex=1.0, title.font=2)
-legend("center", legend=c("Positive Alignment (+)", "Mutual Exclusion (-)"), col=c("#2ecc71", "#e74c3c"), lty=1, lwd=4, bty="n", title="Interaction Type", cex=1.0, title.font=2)
-dev.off()
-
-
-# ==============================================================================
-# 4. ANÁLISIS DE RED INTER-NICHO (CROSS-DOMAIN TALK NPA <-> GUT)
-# ==============================================================================
-cat("\n[4] Módulo 4: Ejecutando Análisis de Red Cross-Domain (Eje Aerodigestivo NPA <-> GUT)...\n")
-
-# Re-confirmamos matrices pareadas estrictas
-otu_npa_paired <- as.matrix(otu_npa)
-otu_gut_paired <- as.matrix(otu_gut)
-
-se_cross <- spiec.easi(list(otu_npa_paired, otu_gut_paired), method="mb", 
-                       lambda.min.ratio=1e-2, nlambda=20, 
-                       pulsar.params=list(rep.num=50, ncores=1))
-
-beta_cross <- as.matrix(symBeta(getOptBeta(se_cross), mode="maxabs"))
-diag(beta_cross) <- 0
-
-n_npa <- ncol(otu_npa_paired)
-n_gut <- ncol(otu_gut_paired)
-total <- n_npa + n_gut
-
-# --- EXPORTACIÓN DE TABLA DE INTERACCIONES INTER-NICHO SIGNIFICATIVAS ---
-block_cross_npa_gut <- beta_cross[1:n_npa, (n_npa+1):total]
-edges_cross <- which(block_cross_npa_gut != 0, arr.ind = TRUE)
-
-if (nrow(edges_cross) > 0) {
-  cross_df <- data.frame(
-    Genus_NPA = colnames(otu_npa_paired)[edges_cross[,1]],
-    Genus_GUT = colnames(otu_gut_paired)[edges_cross[,2]],
-    Weight    = block_cross_npa_gut[edges_cross]
-  ) %>% arrange(desc(abs(Weight)))
-  write.csv(cross_df, paste0(output_dir_nets, "CrossDomain_Associations_NPA_GUT.csv"), row.names = FALSE)
-  cat("  >> Tabla de interacciones guardada: CrossDomain_Associations_NPA_GUT.csv\n")
+compute_global_metrics <- function(g_full, label_name) {
+  total_nodes         <- vcount(g_full)
+  isolated_nodes      <- sum(degree(g_full) == 0)
+  connected_nodes     <- total_nodes - isolated_nodes
+  pct_nodes_discarded <- (isolated_nodes / total_nodes) * 100
+  
+  g_sub <- delete_vertices(g_full, V(g_full)[degree(g_full) == 0])
+  
+  edges_count  <- ecount(g_sub)
+  net_density  <- edge_density(g_sub)
+  cluster_coef <- transitivity(g_sub, type="global") 
+  avg_path_len <- mean_distance(g_sub, directed=FALSE, weights=NA)
+  deg_cent     <- centralization.degree(g_sub)$centralization
+  
+  pos_edges    <- sum(E(g_sub)$weight > 0)
+  neg_edges    <- sum(E(g_sub)$weight < 0)
+  
+  return(data.frame(
+    Niche = label_name,
+    Total_Input_Genera = total_nodes,
+    Connected_Genera = connected_nodes,
+    Isolated_Genera_Discarded = isolated_nodes,
+    Pct_Genera_Discarded = round(pct_nodes_discarded, 2),
+    Total_Edges = edges_count,
+    Positive_Alignments = pos_edges,
+    Mutual_Exclusions = neg_edges,
+    Network_Density = round(net_density, 4),
+    Global_Clustering_Coefficient = round(cluster_coef, 4),
+    Average_Path_Length = round(avg_path_len, 4),
+    Degree_Centralization = round(deg_cent, 4),
+    stringsAsFactors = FALSE
+  ))
 }
 
-# --- CONSTRUCCIÓN Y REPRESENTACIÓN GRÁFICA DEL GRAFO CROSS-DOMAIN ---
-g_cross <- graph_from_adjacency_matrix(beta_cross, mode="undirected", weighted=TRUE, diag=FALSE)
-V(g_cross)$name  <- c(colnames(otu_npa_paired), colnames(otu_gut_paired))
-V(g_cross)$tissue <- c(rep("NPA", n_npa), rep("GUT", n_gut))
+network_comparison_matrix <- rbind(
+  compute_global_metrics(g_npa, "Nasopharynx (NPA)"),
+  compute_global_metrics(g_gut, "Gut (GUT)")
+)
 
-g_cross_sub <- delete_vertices(g_cross, which(degree(g_cross) == 0))
+write.csv(network_comparison_matrix, paste0(output_dir_nets, "Network_Mathematical_Comparison_Matrix.csv"), row.names = FALSE)
+cat("  >> ¡Tabla de comparación topológica global guardada con éxito! (Network_Mathematical_Comparison_Matrix.csv).\n")
 
-if (vcount(g_cross_sub) > 0 && ecount(g_cross_sub) > 0) {
-  v_tissue <- V(g_cross_sub)$tissue
-  el <- as_edgelist(g_cross_sub, names = FALSE)
-  is_cross_edge <- (v_tissue[el[,1]] != v_tissue[el[,2]])
-  
-  E(g_cross_sub)$weight_abs <- abs(E(g_cross_sub)$weight)
-  E(g_cross_sub)$width <- ifelse(is_cross_edge, 4.0, 0.7) 
-  E(g_cross_sub)$color <- ifelse(is_cross_edge,
-                                 ifelse(E(g_cross_sub)$weight > 0, "#2ecc71BB", "#e74c3cBB"), 
-                                 ifelse(E(g_cross_sub)$weight > 0, "#2ecc7115", "#e74c3c15")) 
-  
-  degree_cross_only <- adjacent_vertices(g_cross_sub, V(g_cross_sub))
-  nodes_with_cross_interactions <- sapply(1:vcount(g_cross_sub), function(i) {
-    any(v_tissue[degree_cross_only[[i]]] != v_tissue[i])
-  })
-  V(g_cross_sub)$label <- ifelse(nodes_with_cross_interactions, V(g_cross_sub)$name, "")
-  
-  out_path_premium <- paste0(output_dir_nets, "Network_CrossDomain_SIMPLIFIED.png")
-  png(out_path_premium, width=3200, height=2800, res=300)
-  layout(matrix(c(1,2), nrow=1), widths=c(3,1))
-  par(mar=c(2, 2, 5, 2), bg="white")
-  
-  set.seed(123)
-  plot(g_cross_sub, 
-       layout=layout_with_fr(g_cross_sub, weights=E(g_cross_sub)$weight_abs),
-       vertex.color=ifelse(V(g_cross_sub)$tissue == "NPA", "#2980b9", "#27ae60"), 
-       vertex.size=6, vertex.frame.color="#2c3e50", vertex.frame.width=1,
-       vertex.label=V(g_cross_sub)$label, vertex.label.cex=0.6, vertex.label.font=4, vertex.label.color="#2c3e50",
-       main="Aerodigestive Axis: Inter-Niche Translocation Slopes (NPA <-> GUT)")
-  
-  par(mar=c(2, 0, 5, 1)); plot.new()
-  legend("topleft", legend=c("Nasopharynx (NPA)", "Gut (GUT)"), col=c("#2980b9", "#27ae60"), pch=21, pt.bg=c("#2980b9", "#27ae60"), bty="n", title="Niche Source Location", cex=1.1, title.font=2)
-  legend("center", legend=c("Positive Alignment (+)", "Negative Alignment (-)"), col=c("#2ecc71", "#e74c3c"), lty=1, lwd=4, bty="n", title="Inter-Niche Edge Profile", cex=1.1, title.font=2)
-  dev.off()
-}
 
-cat("\n[Pipeline Finalizado de forma Exitosa. Estructura ordenada y robusta].\n")
 # ==============================================================================
 # SECCIÓN ADICIONAL: GENERACIÓN DE FIGURA INTEGRADA MÁSTER (Figure_5) - FIJADA
 # ==============================================================================
@@ -723,20 +593,16 @@ library(cowplot)
 library(grid)
 library(RColorBrewer)
 
+log_mean_npa <- log1p(colMeans(otu_npa, na.rm = TRUE))
+log_mean_gut <- log1p(colMeans(otu_gut, na.rm = TRUE))
+
 # --- PANEL A: Red de Nasofaringe (NPA) (Layout Original + Enlaces Gruesos) ---
 g_npa_fig5 <- delete_vertices(g_npa, V(g_npa)[V(g_npa)$module == 0])
-
-# Mantenemos el salto de línea SOLO en los nombres de las bacterias (nodos)
 V(g_npa_fig5)$label <- gsub("([-_])", "\\1\n", V(g_npa_fig5)$name)
-
-# Estética de Enlaces
 E(g_npa_fig5)$color <- ifelse(E(g_npa_fig5)$weight > 0, "#2ecc71DD", "#e74c3cDD")
-
-# Enlaces más gruesos respetando la proporción original que pediste
 E(g_npa_fig5)$width <- abs(E(g_npa_fig5)$weight) * 8.5
 V(g_npa_fig5)$size  <- 4 + (log_mean_npa[V(g_npa_fig5)$name] * 1.5)
 
-# Paleta dinámica
 unique_npa_mods5 <- sort(unique(V(g_npa_fig5)$module))
 n_mods <- length(unique_npa_mods5)
 colores_dinamicos <- colorRampPalette(brewer.pal(min(8, n_mods), "Set1"))(n_mods)
@@ -744,15 +610,10 @@ color_map_npa5    <- setNames(paste0(colores_dinamicos, "E6"), unique_npa_mods5)
 V(g_npa_fig5)$color_node <- color_map_npa5[as.character(V(g_npa_fig5)$module)]
 
 p_network_a <- ~{
-  # Dejamos una proporción bien balanceada
   layout(matrix(c(1,2), nrow=1), widths=c(3.8, 0.9))
-  
-  # Quitamos márgenes exteriores por completo en el plot de la red
   par(mar=c(0, 0, 0, 0), bg="white")
   set.seed(42)
   
-  # MODIFICACIÓN CRÍTICA: Forzamos límites xlim e ylim expandidos y desactivamos el 
-  # auto-escalado rígido para que la red aproveche los extremos laterales.
   plot(g_npa_fig5, 
        layout=layout_with_fr(g_npa_fig5, weights=abs(E(g_npa_fig5)$weight)), 
        vertex.color=V(g_npa_fig5)$color_node, 
@@ -763,25 +624,19 @@ p_network_a <- ~{
        vertex.label.cex=0.85,          
        vertex.label.font=2, 
        vertex.label.color="#2c3e50",
-       rescale=TRUE,                 # Permite que responda a los límites
-       xlim=c(-1, 1),            # Estira el lienzo horizontalmente hacia la derecha
-       ylim=c(-1.0, 1.0))            # Centra verticalmente ajustado
+       rescale=TRUE,                 
+       xlim=c(-1, 1),            
+       ylim=c(-1.0, 1.0))
   
-  # Leyendas del Grafo corregidas (Módulos planos en una línea)
   par(mar=c(1, 0, 1, 1))
   plot.new()
-  
-  # Leyenda de Módulos (Plana)
   legend(x = "center", y = 0.85, legend=paste("Mod", names(color_map_npa5)), 
          col=color_map_npa5, pch=19, bty="n", title="Modules", cex=1, title.font=2, y.intersp=1.2)
-  
-  # Leyenda de Interacciones
   legend(x = "top", y = 0.95, legend=c("Alignment (+)", "Exclusion (-)"), 
          col=c("#2ecc71", "#e74c3c"), lty=1, lwd=6, bty="n", title="Interactions", cex=1.1, title.font=2, y.intersp=1.2)
 }
 
-
-# --- PANEL B: Heatmap Clínico (Módulos estrictamente en una sola línea) ---
+# --- PANEL B: Heatmap Clínico ---
 p_heatmap_b <- ggplot(regression_results, aes(x = Predictor, y = Module, fill = Effect_Size)) +
   geom_tile(color = "white", lwd = 0.6) +
   geom_text(aes(label = Cell_Text), color = "black", size = 4.0, fontface = "bold") + 
@@ -800,8 +655,7 @@ p_heatmap_b <- ggplot(regression_results, aes(x = Predictor, y = Module, fill = 
         legend.position = "right",
         plot.margin = margin(t = 5, r = 5, b = 5, l = 15, unit = "pt"))
 
-
-# --- COMBINACIÓN Y GUARDADO DE FIGURE_5 ---
+# --- COMBINACIÓN Y GUARDADO DE FIGURE_5 MÁSTER ---
 figure_5_final <- plot_grid(
   p_network_a, 
   p_heatmap_b, 
@@ -821,16 +675,15 @@ ggsave(
   bg = "white"
 )
 cat("  >> [Éxito] Figure_5 guardada maximizando realmente el espacio horizontal.\n")
+
+
 # ==============================================================================
 # GENERACIÓN DE LA SUPPLEMENTARY FIGURE 5: RED DE INTESTINO (GUT)
 # ==============================================================================
-cat("\n[Figuras] Generando la Supplementary Figure 5 (Red GUT Independiente)...\n")
-
-library(RColorBrewer)
+cat("\n[Figuras] Generando la Supplementary Figure 5 (Red GUT Independiente CORREGIDA)...\n")
 
 g_gut_supp5 <- delete_vertices(g_gut, V(g_gut)[V(g_gut)$module == 0])
 V(g_gut_supp5)$label <- gsub("([-_])", "\\1\n", V(g_gut_supp5)$name)
-
 E(g_gut_supp5)$color <- ifelse(E(g_gut_supp5)$weight > 0, "#2ecc71DD", "#e74c3cDD")
 E(g_gut_supp5)$width <- abs(E(g_gut_supp5)$weight) * 8.5
 V(g_gut_supp5)$size  <- 5 + (log_mean_gut[V(g_gut_supp5)$name] * 1.5)
@@ -841,7 +694,6 @@ colores_gut5 <- colorRampPalette(brewer.pal(min(8, n_mods_gut5), "Dark2"))(n_mod
 color_map_gut5 <- setNames(paste0(colores_gut5, "E6"), unique_gut_mods5)
 V(g_gut_supp5)$color_node <- color_map_gut5[as.character(V(g_gut_supp5)$module)]
 
-# Guardado en alta resolución con formato rectangular óptimo
 out_supp5 <- paste0(output_dir_nets, "Supplementary_Figure_5.png")
 png(out_supp5, width = 3400, height = 2400, res = 300)
 
@@ -849,9 +701,8 @@ layout(matrix(c(1,2), nrow=1), widths=c(3.9, 0.9))
 par(mar=c(1, 1, 1, 1), bg="white")
 set.seed(88)
 
-# El algoritmo FR ahora tiene todo el lienzo horizontal para distribuir los nodos conexos
 plot(g_gut_supp5, 
-     layout=layout_with_fr(g_gut_supp5, weights=abs(E(g_gut_supp5)$weight), grid="nogrid"), 
+     layout=layout_with_fr(g_gut_supp5, weights=abs(E(g_gut_supp5)$weight)), 
      vertex.color=V(g_gut_supp5)$color_node, 
      vertex.size=V(g_gut_supp5)$size, 
      vertex.frame.color="#1a252f", 
@@ -869,55 +720,5 @@ legend(x = "bottom", y = 0.15, legend=c("Alignment (+)", "Exclusion (-)"),
        col=c("#2ecc71", "#e74c3c"), lty=1, lwd=6, bty="n", title="Interactions", cex=1.1, title.font=2, y.intersp=1.3)
 
 dev.off()
-cat("  >> [Éxito] Supplementary_Figure_5 guardada correctamente.\n")
-
-# ==============================================================================
-# GENERACIÓN DE LA SUPPLEMENTARY FIGURE 6: RED INTER-NICHO (CROSS-DOMAIN)
-# ==============================================================================
-cat("\n[Figuras] Generando la Supplementary Figure 6 (Red Cross-Domain Filtrada)...\n")
-
-v_tissue_all <- V(g_cross)$tissue
-el_all <- as_edgelist(g_cross, names = FALSE)
-is_cross_edge_all <- (v_tissue_all[el_all[,1]] != v_tissue_all[el_all[,2]])
-nodes_with_cross <- unique(c(el_all[is_cross_edge_all, 1], el_all[is_cross_edge_all, 2]))
-
-g_cross_filtered <- subgraph(g_cross, nodes_with_cross)
-V(g_cross_filtered)$label <- gsub("([-_])", "\\1\n", V(g_cross_filtered)$name)
-
-v_tissue_f <- V(g_cross_filtered)$tissue
-el_f <- as_edgelist(g_cross_filtered, names = FALSE)
-is_cross_edge_f <- (v_tissue_f[el_f[,1]] != v_tissue_f[el_f[,2]])
-
-E(g_cross_filtered)$width <- abs(E(g_cross_filtered)$weight) * 12
-E(g_cross_filtered)$color <- ifelse(E(g_cross_filtered)$weight > 0, "#2ecc71DD", "#e74c3cDD")
-g_cross_final_plot <- delete_edges(g_cross_filtered, which(!is_cross_edge_f))
-
-# Guardado independiente en alta resolución
-out_supp6 <- paste0(output_dir_nets, "Supplementary_Figure_6.png")
-png(out_supp6, width = 3400, height = 2400, res = 300)
-
-layout(matrix(c(1,2), nrow=1), widths=c(3.9, 0.9))
-par(mar=c(0, 0, 0, 0), bg="white")
-set.seed(123)
-
-plot(g_cross_final_plot, 
-     layout=layout_with_fr(g_cross_final_plot, weights=abs(E(g_cross_final_plot)$weight)), 
-     vertex.color=ifelse(V(g_cross_final_plot)$tissue == "NPA", "#2980b9E6", "#27ae60E6"), 
-     vertex.size=6.5, 
-     vertex.frame.color="#1a252f", 
-     vertex.frame.width=0.9,
-     vertex.label=V(g_cross_final_plot)$label, 
-     vertex.label.cex=0.85,          
-     vertex.label.font=2, 
-     vertex.label.color="#2c3e50",
-     rescale=TRUE, xlim=c(-1.0, 1.0), ylim=c(-1.0, 1.0))
-
-par(mar=c(1, 0, 1, 1))
-plot.new()
-legend(x = "center", y = 0.85, legend=c("Nasopharynx", "Gut"), 
-       col=c("#2980b9", "#27ae60"), pch=19, bty="n", title="Niche Source", cex=1.1, title.font=2, y.intersp=1.3)
-legend(x = "bottom", y = 0.15, legend=c("Coupling (+)", "Inhibition (-)"), 
-       col=c("#2ecc71", "#e74c3c"), lty=1, lwd=6, bty="n", title="Cross-Talk", cex=1.1, title.font=2, y.intersp=1.3)
-
-dev.off()
-cat("  >> [Éxito] Supplementary_Figure_6 guardada correctamente.\n")
+cat("  >> [Éxito] Supplementary_Figure_5 guardada correctamente con red simetrizada.\n")
+cat("\n[Pipeline Finalizado de forma Exitosa. Estructura ordenada y robusta].\n")
