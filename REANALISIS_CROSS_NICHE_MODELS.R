@@ -78,7 +78,7 @@ pseq_prop <- transform_sample_counts(pseq_genus, function(x) log10((x / sum(x)) 
 
 metadata_df <- extract_meta(pseq_prop) %>%
   mutate(
-    Age = as.numeric(Age),
+    Age = as.numeric(scale(as.numeric(Age))),
     Patient_ID  = as.factor(Patient_ID),
     Sample_Type = ifelse(Sample_Type %in% c("ANF", "NPA"), "NPA", "GUT")
   )
@@ -114,7 +114,7 @@ df_model_bql_pre$Ruminococcus_GUT <- vec_ruminococcus[df_model_bql_pre$Sample_ID
 df_npa_side <- df_model_bql_pre %>% 
   filter(Sample_Type == "NPA" & Patient_ID %in% patients_with_both) %>%
   select(Patient_ID, Age, Wheezing_Bin, Burkholderia_NPA, 
-         Breastfeeding, Family.history.atopy, Passive.smoking, Cesarean.section, Previous.antibiotics)
+         Respiratory.syncytial.virus, Family.history.atopy, Passive.smoking, Cesarean.section, Previous.antibiotics)
 
 df_gut_side <- df_model_bql_pre %>% 
   filter(Sample_Type == "GUT" & Patient_ID %in% patients_with_both) %>%
@@ -123,14 +123,14 @@ df_gut_side <- df_model_bql_pre %>%
 df_final_modelo <- df_npa_side %>%
   dplyr::inner_join(df_gut_side, by = "Patient_ID") %>%
   drop_na(Burkholderia_NPA, Ruminococcus_GUT, Age, Wheezing_Bin,
-          Breastfeeding, Family.history.atopy, Passive.smoking, Cesarean.section, Previous.antibiotics)
+          Respiratory.syncytial.virus, Family.history.atopy, Passive.smoking, Cesarean.section, Previous.antibiotics)
 
 # ------------------------------------------------------------------------------
-# NUEVO: ARMONIZACIÓN Y CONVERSIÓN FACTOR-DUMMY DE COVARIABLES CLÍNICAS
+# ARMONIZACIÓN Y CONVERSIÓN FACTOR-DUMMY DE COVARIABLES CLÍNICAS (RSV INCLUIDO)
 # ------------------------------------------------------------------------------
 df_final_modelo <- df_final_modelo %>%
   mutate(
-    Breastfeeding        = ifelse(Breastfeeding == "Yes", 1, 0),
+    RSV                  = ifelse(Respiratory.syncytial.virus == "Yes", 1, 0),
     Family.history.atopy = ifelse(Family.history.atopy == "Yes", 1, 0),
     Passive.smoking      = ifelse(Passive.smoking == "Yes", 1, 0),
     Cesarean.section     = ifelse(Cesarean.section == "Yes", 1, 0),
@@ -145,7 +145,7 @@ cat(paste(" >> [SUCCESS] Cohorte BQL+ finalizada con", nrow(df_final_modelo), "p
 cat("\n[3] Ajustando modelo logístico multivariante expandido...\n")
 
 mv_model <- glm(Wheezing_Bin ~ Burkholderia_NPA + Ruminococcus_GUT + Age + 
-                  Breastfeeding + Family.history.atopy + Passive.smoking + 
+                  RSV + Family.history.atopy + Passive.smoking + 
                   Cesarean.section + Previous.antibiotics, 
                 data = df_final_modelo, family = binomial)
 
@@ -157,7 +157,7 @@ model_hits <- tidy(mv_model, conf.int = TRUE, exponentiate = TRUE) %>%
       term == "Burkholderia_NPA"        ~ "Burkholderia-\nCaballeronia-\nParaburkholderia\n(NPA)",
       term == "Ruminococcus_GUT"        ~ "[Ruminococcus]\ngnavus group\n(GUT)",
       term == "Age"                     ~ "Age (Months)",
-      term == "Breastfeeding"           ~ "Breastfeeding\n(Yes)",
+      term == "RSV"                     ~ "RSV\n(Yes)",
       term == "Family.history.atopy"    ~ "Family History\nof Atopy (Yes)",
       term == "Passive.smoking"         ~ "Passive Smoking\n(Yes)",
       term == "Cesarean.section"        ~ "Cesarean Section\n(Yes)",
