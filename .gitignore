@@ -1,0 +1,10 @@
+data/clinical/
+*.sav
+.Rhistory
+.RData
+.Rproj.user/
+.ipynb_checkpoints/
+results/logs/
+results/
+tables/
+figures/

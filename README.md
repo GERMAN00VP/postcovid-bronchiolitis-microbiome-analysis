@@ -1,89 +1,49 @@
-# 🧬 Bronchiolitis Microbiome Analysis 
+# Respiratory and gut microbiota in post-COVID bronchiolitis and recurrent wheezing
 
-This repository contains the updated scripts, input data, and comprehensive outputs used for the analysis of respiratory and gut microbiota in infant bronchiolitis.
+Analysis code for *"Respiratory Microbiota Composition in Bronchiolitis and Its Association with Recurrent Wheezing in Infants"* (Frontiers, revised version). The pipeline regenerates every figure and supplementary table of the manuscript from the processed 16S rRNA data in `data/`.
 
----
+## Run
 
-## 📂 Repository Structure
+From the repository root (R ≥ 4.6; package versions in `results/sessionInfo.txt`):
 
-<details>
-<summary><strong>Click to expand full tree structure</strong></summary>
-<pre><code>.
-├── data/
-│   ├── phyloseq_data/
-│   │   ├── otu_table.csv
-│   │   ├── sample_data.csv
-│   │   └── tax_table.csv
-│   └── phyloseq_object.rds
-│
-├── REANALISIS/
-│   ├── Global/             # Joint NPA vs GUT comparative analyses & multi-omics plots
-│   │   ├── curated_data_global/
-│   │   └── ESTADISTICA_CONJUNTA/
-│   ├── GUT/                # Gut microbiota specific sub-pipeline (Alpha, Beta, ANCOM, Models)
-│   │   ├── abundances/
-│   │   ├── alpha/
-│   │   ├── beta/
-│   │   └── models/
-│   ├── NPA/                # Nasopharyngeal aspirate specific sub-pipeline
-│   │   ├── abundances/
-│   │   ├── alpha/
-│   │   ├── beta/
-│   │   └── models/
-│   └── NETWORKS/           # Cross-domain network interactions and clinical associations
-│   
-├── REANALISIS_initial_comparations.R  # Initial data parsing and global curation
-├── REANALISIS_GUT.R                   # Core statistical pipeline for Gut samples
-├── REANALISIS_NPA.R                   # Core statistical pipeline for NPA samples
-└── REANALISIS_NETWORKS_INTERACTION.R  # Multi-domain network construction (igraph)</code></pre>
-</details>
+```bash
+Rscript scripts/00_run_all.R
+```
 
----
+or run the scripts one by one, in order:
 
-## 🚀 Reanalysis Workflow
-
-The analysis pipeline is divided into four main execution blocks. All core statistical outputs, tables, and publication-ready figures are automatically exported to the REANALISIS/ directory.
-
-### 1. Global Exploration & Curation
-Initial data synchronization and comparative baseline statistics between Nasopharyngeal Aspirates (NPA) and Gut (GUT) samples.
-* **Script:** REANALISIS_initial_comparations.R
-* **Key Outputs (REANALISIS/Global/):**
-    * Curated matrices: phyloseq_RAREFIED_global.rds, phyloseq_RAW_curated_global.rds
-    * Main Panels: Plot_Alpha_Genus_Panel.png, Plot_Beta_Genus_Panel.png
-    * Statistics: Joint LME ANOVA and Post-Hoc Tukey tables (ESTADISTICA_CONJUNTA/)
-
-### 2. Gut & NPA Independent Pipelines
-Parallel analysis tracks to evaluate alpha diversity, beta diversity dispersion, differential abundance (ANCOM-BC), and predictive clinical modeling (Univariate/Multivariate Logistic Regressions & ROC Curves).
-* **Scripts:** REANALISIS_GUT.R and REANALISIS_NPA.R
-* **Key Outputs (REANALISIS/GUT/ & REANALISIS/NPA/):**
-    * alpha/: Pairwise Wilcoxon tests with FDR corrections + Clean Boxplots.
-    * beta/: PERMANOVA tables and PCoA projections (Plot_Beta_Diversity_PCoA.png).
-    * abundances/: Mega-Boxplots of global significant features via ANCOM.
-    * models/: Univariate risk tables, definitive Multivariate Models, and Forest Plots.
-
-### 3. Cross-Domain Network Interactions
-Co-occurrence and association networks evaluating cross-domain relationships between the respiratory tract and the gut, correlated with clinical covariates.
-* **Script:** REANALISIS_NETWORKS_INTERACTION.R
-* **Key Outputs (REANALISIS/NETWORKS/):**
-    * Network Objects: igraph_Genus_GUT.rds, igraph_Genus_NPA.rds
-    * Visualizations: Dissected internal networks, simplified cross-domain maps, and expanded clinical heatmaps.
-    * Data: Target Hub Genera lists and clinical association master tables.
-
----
-
-## 🧱 Key Downstream Outputs
-
-| Target Analysis | Main Figures | Main Statistical Tables |
+| Script | Content | Outputs |
 |:---|:---|:---|
-| **Global Sync** | Diagnostic_PCoA_Bray_Curtis_FINAL.png | PERMANOVA_BrayCurtis_Genus_Restringida.csv |
-| **NPA / GUT Core** | Plot_MegaBoxplot_Minimal.png | Table_ANCOM_Global_Significant.csv |
-| **Predictive Models** | Plot_ROC_Curve_Multivariate.png | Table_Multivariate_Model_Definitive.csv |
-| **Networks** | Network_CrossDomain_SIMPLIFIED.png | Master_Taxa_Module_Clinical_Associations_FINAL.csv |
+| `01_sample_qc.R` | Pre-specified sample QC (depth, anatomical-site concordance, sample mix-up), sample flow, rarefaction curves | Supplementary Figure 6, data for Supplementary Table 5 |
+| `02_curation_and_composition.R` | Exclusions, rarefaction, clinical-virological groups, curated objects | Figure 1 |
+| `03_nasopharyngeal_analysis.R` | NPA alpha/beta diversity (age-adjusted), case–control comparison restricted to the age range of the controls, ANCOM-BC2, wheezing risk models | Figures 2–4, data for Supplementary Tables 1 and 4 |
+| `04_gut_analysis.R` | Same analyses for stool | Supplementary Figures 2–4, Supplementary Table 2 |
+| `05_cross_niche_model.R` | Cross-niche wheezing model | Figure 5 |
+| `06_niche_comparison_and_networks.R` | NPA vs. gut comparison, SpiecEasi networks, module–trait regressions | Supplementary Figure 1, Figure 6, Supplementary Figure 5, Supplementary Table 3 |
+| `07_supplementary_tables.R` | Assembles the supplementary tables | `tables/supplementary/*.xlsx` |
 
----
+Shared functions are in `R/functions.R`. Figures are written to `figures/main/` and `figures/supplementary/` (JPEG, named by figure number); intermediate results to `results/`.
 
-## 🔬 Dependencies & Data
+Tables 1 and 2 (clinical characteristics) are produced by `notebooks/Tables_1_2_clinical_characteristics.ipynb` (Python 3.12: pandas, NumPy, SciPy, statsmodels, pyreadstat). Its input clinical database is confidential and is not included (`data/clinical/` is git-ignored).
 
-* **R Environment:** Requires R >= 4.1
-* **Core Packages:** phyloseq, vegan, ANCOMBC, igraph, ggplot2, dplyr, nlme, pROC, SpiecEasi
-* **Input Data:** Processed OTU tables, taxonomic assignments, and sample metadata are fully contained within the data/phyloseq_data/ directory for immediate reproducibility.
+## Data
+
+`data/phyloseq_object.rds` (and the same data as CSV in `data/phyloseq_data/`): ASV counts, SILVA 138.1 taxonomy and pseudonymised sample metadata for the 177 sequenced samples (90 nasopharyngeal aspirates, 87 stool samples). Raw reads: NCBI SRA, BioProject PRJNAXXXXXX.
+
+## Changes in the revised version (peer review)
+
+Changes are marked in the code with `[Revision 1 - Rx.y]`, where R1/R2 is the reviewer and x.y the comment.
+
+| Change | Reviewer point |
+|:---|:---|
+| Pre-specified sample QC: depth ≥ 10,000 reads; anatomical-site concordance; exclusion only with evidence of sample mix-up (Bray–Curtis < 0.10 to another participant). Excludes both samples of one control (HULP71); BQLHSO91GUT, removed in the submission after visual PCoA inspection, is retained | R1 comment 5 / recommendation a |
+| Rarefaction curves | R2 comment 1 |
+| Alpha diversity: joint model `index ~ group + ns(age, 3)` with FDR-corrected pairwise contrasts, replacing residuals + Wilcoxon | R1 comment 2, R2 comment 3 |
+| Pairwise PERMANOVA adjusted for age and BH-FDR corrected (`pairwiseAdonis::pairwise.adonis2` ignores `p.adjust.m`, so the submitted "FDR" values were unadjusted) | R2 comment 3 |
+| Case–control comparison restricted to cases within the age range of the controls (3.7–9.0 months): alpha diversity, PERMANOVA, ANCOM-BC2 (Supplementary Table 4) | R1 comment 1 and recommendation d |
+| Cross-niche model reported with its final specification (RSV-adjusted); age axis labelled per SD | consistency |
+| Tables 1–2: Hodges–Lehmann location shift with 95% CI; decimal points | R2 comment 4 |
+| Network edge lists and igraph objects exported | reproducibility |
+| Network figures drawn with a module-aware layout and non-overlapping labels (the networks themselves are unchanged by this step) | legibility |
+
+Steps that draw random numbers (permutations, plot jitter, imputation noise, SpiecEasi, Louvain) run in a fixed order with fixed seeds; the age-restricted analysis runs inside `with_preserved_seed()` so that it does not alter the main results.
