@@ -30,20 +30,5 @@ Tables 1 and 2 (clinical characteristics) are produced by `notebooks/Tables_1_2_
 
 `data/phyloseq_object.rds` (and the same data as CSV in `data/phyloseq_data/`): ASV counts, SILVA 138.1 taxonomy and pseudonymised sample metadata for the 177 sequenced samples (90 nasopharyngeal aspirates, 87 stool samples). Raw reads: NCBI SRA, BioProject PRJNAXXXXXX.
 
-## Changes in the revised version (peer review)
-
-Changes are marked in the code with `[Revision 1 - Rx.y]`, where R1/R2 is the reviewer and x.y the comment.
-
-| Change | Reviewer point |
-|:---|:---|
-| Pre-specified sample QC: depth ≥ 10,000 reads; anatomical-site concordance; exclusion only with evidence of sample mix-up (Bray–Curtis < 0.10 to another participant). Excludes both samples of one control (HULP71); BQLHSO91GUT, removed in the submission after visual PCoA inspection, is retained | R1 comment 5 / recommendation a |
-| Rarefaction curves | R2 comment 1 |
-| Alpha diversity: joint model `index ~ group + ns(age, 3)` with FDR-corrected pairwise contrasts, replacing residuals + Wilcoxon | R1 comment 2, R2 comment 3 |
-| Pairwise PERMANOVA adjusted for age and BH-FDR corrected (`pairwiseAdonis::pairwise.adonis2` ignores `p.adjust.m`, so the submitted "FDR" values were unadjusted) | R2 comment 3 |
-| Case–control comparison restricted to cases within the age range of the controls (3.7–9.0 months): alpha diversity, PERMANOVA, ANCOM-BC2 (Supplementary Table 4) | R1 comment 1 and recommendation d |
-| Cross-niche model reported with its final specification (RSV-adjusted); age axis labelled per SD | consistency |
-| Tables 1–2: Hodges–Lehmann location shift with 95% CI; decimal points | R2 comment 4 |
-| Network edge lists and igraph objects exported | reproducibility |
-| Network figures drawn with a module-aware layout and non-overlapping labels (the networks themselves are unchanged by this step) | legibility |
 
 Steps that draw random numbers (permutations, plot jitter, imputation noise, SpiecEasi, Louvain) run in a fixed order with fixed seeds; the age-restricted analysis runs inside `with_preserved_seed()` so that it does not alter the main results.
