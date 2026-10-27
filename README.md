@@ -1,6 +1,6 @@
 # Respiratory and gut microbiota in post-COVID bronchiolitis and recurrent wheezing
 
-Analysis code for *"Respiratory Microbiota Composition in Bronchiolitis and Its Association with Recurrent Wheezing in Infants"* (Frontiers, revised version). The pipeline regenerates every figure and supplementary table of the manuscript from the processed 16S rRNA data in `data/`.
+Analysis code for *"Respiratory Microbiota Composition in Bronchiolitis and Its Association with Recurrent Wheezing in Infants"*. The pipeline regenerates every figure and supplementary table of the manuscript from the processed 16S rRNA data in `data/`.
 
 ## Run
 
@@ -26,9 +26,10 @@ Shared functions are in `R/functions.R`. Figures are written to `figures/main/` 
 
 Tables 1 and 2 (clinical characteristics) are produced by `notebooks/Tables_1_2_clinical_characteristics.ipynb` (Python 3.12: pandas, NumPy, SciPy, statsmodels, pyreadstat). Its input clinical database is confidential and is not included (`data/clinical/` is git-ignored).
 
-## Data
+---
 
-`data/phyloseq_object.rds` (and the same data as CSV in `data/phyloseq_data/`): ASV counts, SILVA 138.1 taxonomy and pseudonymised sample metadata for the 177 sequenced samples (90 nasopharyngeal aspirates, 87 stool samples). Raw reads: NCBI SRA, BioProject PRJNAXXXXXX.
+Raw reads: NCBI SRA, BioProject [PRJNA1551058](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1551058).
 
+---
 
 Steps that draw random numbers (permutations, plot jitter, imputation noise, SpiecEasi, Louvain) run in a fixed order with fixed seeds; the age-restricted analysis runs inside `with_preserved_seed()` so that it does not alter the main results.
