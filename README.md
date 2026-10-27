@@ -4,7 +4,7 @@ Analysis code for *"Respiratory Microbiota Composition in Bronchiolitis and Its 
 
 ## Run
 
-From the repository root (R ≥ 4.6; package versions in `results/sessionInfo.txt`):
+From the repository root (R ≥ 4.6; package versions in `R/sessionInfo.txt`):
 
 ```bash
 Rscript scripts/00_run_all.R
